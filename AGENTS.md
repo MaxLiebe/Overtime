@@ -33,14 +33,15 @@ prefer those over duplicating here.
 
 ### Running the app (Electron) in this cloud VM
 
-- A virtual display is available at `DISPLAY=:1`. Chromium/Electron needs the
-  sandbox disabled in this container: run with `--no-sandbox`, e.g.
-  `DISPLAY=:1 npx electron dist/electron/main.js --no-sandbox` (build first with
-  `npm run build:electron`). The npm `electron` script does not pass
-  `--no-sandbox`, so launch electron directly when running headless.
-- On startup Electron prints benign errors that can be ignored:
-  `Failed to connect to the bus` (no DBus) and GPU init / `command_buffer`
-  errors (software rendering). The window still loads and is fully interactive.
+- A virtual display is available at `DISPLAY=:1`. From `nodejs/`, run
+  `DISPLAY=:1 npm run electron`. The script already passes `--no-sandbox`, and
+  `electron/main.ts` also disables the Chromium sandbox / GPU sandbox and
+  hardware acceleration on Linux so the app does not fatal with
+  `GPU process isn't usable` in containers.
+- On startup Electron may still print benign errors that can be ignored:
+  `Failed to connect to the bus` (no DBus) and occasional GPU init /
+  `command_buffer` lines under software rendering. The window still loads and
+  is fully interactive.
 - The app runs in the system tray and, by default, keeps running when the window
   is closed (Settings → "Minimize to tray when closing window"). Kill it by PID
   when done; do not rely on closing the window.

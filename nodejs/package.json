@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc",
     "build:electron": "npm run build && tsc -p electron/tsconfig.json",
-    "electron": "npm run build:electron && electron dist/electron/main.js",
+    "electron": "npm run build:electron && electron dist/electron/main.js --no-sandbox",
     "match-history": "tsx examples/match-history/index.ts",
     "replay-saver": "tsx examples/replay-saver/index.ts"
   },

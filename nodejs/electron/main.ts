@@ -31,6 +31,16 @@ import {
 } from "rlapi";
 import { openEpicLoginWindow } from "./epicAuth.js";
 
+// Chromium's sandbox and GPU process need privileges / devices that are often
+// unavailable in containerized Linux (Docker, cloud agent VMs). Apply these
+// before app ready so `npm run electron` does not fatal with
+// "GPU process isn't usable".
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("no-sandbox");
+  app.commandLine.appendSwitch("disable-gpu-sandbox");
+  app.disableHardwareAcceleration();
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
