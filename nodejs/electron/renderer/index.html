@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>RL Replay Save</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div>
+          <h1>RL Replay Save</h1>
+          <p id="status-line">Starting…</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="sync-now" class="btn btn-primary">Sync Now</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="replays">Saved Replays</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <main>
+      <section id="replays-panel" class="panel active">
+        <div id="auth-banner" class="auth-banner hidden">
+          <div>
+            <strong>Sign in to sync replays</strong>
+            <p class="hint">
+              Connect your Epic Games account to download match replays automatically.
+            </p>
+          </div>
+          <button id="auth-banner-login" class="btn btn-epic" type="button">
+            Add Epic account
+          </button>
+        </div>
+        <div id="sync-banner" class="sync-banner hidden"></div>
+        <div class="panel-toolbar">
+          <input
+            id="replay-search"
+            type="search"
+            placeholder="Search by playlist, map, or result…"
+          />
+          <span id="replay-count" class="muted">0 replays</span>
+        </div>
+        <div id="replay-list" class="replay-list"></div>
+        <div id="replay-empty" class="empty-state hidden">
+          <h2>No replays saved yet</h2>
+          <p>
+            Replays will appear here after the first successful sync. The app
+            checks for new matches in the background.
+          </p>
+        </div>
+      </section>
+
+      <section id="settings-panel" class="panel">
+        <form id="settings-form" class="settings-form">
+          <fieldset>
+            <legend>Sync</legend>
+            <label>
+              Poll interval (minutes)
+              <input id="poll-interval" type="number" min="1" max="120" step="1" />
+            </label>
+            <label class="checkbox">
+              <input id="start-minimized" type="checkbox" />
+              Start minimized to tray
+            </label>
+            <label class="checkbox">
+              <input id="minimize-on-close" type="checkbox" />
+              Minimize to tray when closing window
+            </label>
+            <label class="checkbox">
+              <input id="launch-at-login" type="checkbox" />
+              Launch at login
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Replay folder</legend>
+            <div class="path-row">
+              <input id="replay-dir" type="text" readonly />
+              <button type="button" id="browse-replay-dir" class="btn">Browse…</button>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Ballchasing</legend>
+            <label class="checkbox">
+              <input id="auto-upload-ballchasing" type="checkbox" />
+              Automatically upload new replays to Ballchasing
+            </label>
+            <label>
+              API token
+              <div class="token-row">
+                <input
+                  id="ballchasing-token"
+                  type="password"
+                  placeholder="Paste your Ballchasing API token"
+                  autocomplete="off"
+                />
+                <button type="button" id="validate-token" class="btn">Validate</button>
+              </div>
+              <span id="token-status" class="hint"></span>
+            </label>
+            <label>
+              Upload visibility
+              <select id="ballchasing-visibility">
+                <option value="private">Private</option>
+                <option value="unlisted">Unlisted</option>
+                <option value="public">Public</option>
+              </select>
+            </label>
+            <p class="hint">
+              Get your token at
+              <a href="#" id="ballchasing-token-link">ballchasing.com/upload</a>.
+            </p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Epic Games accounts</legend>
+            <p id="auth-status" class="hint">Checking accounts…</p>
+            <div id="accounts-list" class="accounts-list"></div>
+            <div class="auth-actions">
+              <button type="button" id="add-epic-account" class="btn btn-epic">
+                Add Epic account
+              </button>
+            </div>
+            <details class="auth-advanced">
+              <summary>Advanced: paste authorization code manually</summary>
+              <label>
+                Authorization code
+                <div class="token-row">
+                  <input
+                    id="auth-code"
+                    type="text"
+                    placeholder="Only needed if in-app login fails"
+                    autocomplete="off"
+                  />
+                  <button type="button" id="submit-auth-code" class="btn">
+                    Connect
+                  </button>
+                </div>
+              </label>
+            </details>
+          </fieldset>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

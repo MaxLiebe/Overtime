@@ -1,0 +1,31 @@
+{
+  "name": "rlapi",
+  "version": "0.1.0",
+  "description": "Node.js port of the Rocket League PsyNet API (match history and auth)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:electron": "npm run build && tsc -p electron/tsconfig.json",
+    "electron": "npm run build:electron && electron dist/electron/main.js",
+    "match-history": "tsx examples/match-history/index.ts",
+    "replay-saver": "tsx examples/replay-saver/index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/ws": "^8.18.1",
+    "electron": "^35.7.5",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}
