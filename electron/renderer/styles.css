@@ -2478,6 +2478,10 @@ input[type="number"].inline-number--minutes {
   flex-wrap: wrap;
 }
 
+.update-row {
+  margin-top: 12px;
+}
+
 .update-status {
   margin: 0;
 }

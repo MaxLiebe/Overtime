@@ -5,6 +5,14 @@
 /** @typedef {import('../../dist/accounts.js').PublicLinkedAccount} LinkedAccount */
 
 const api = window.api;
+if (!api) {
+  const statusLine = document.getElementById("status-line");
+  if (statusLine) {
+    statusLine.textContent =
+      "Failed to start: preload bridge missing. Restart Overtime or reinstall.";
+  }
+  throw new Error("window.api is undefined — preload script did not load");
+}
 
 /** @type {PublicAppConfig | null} */
 let config = null;
