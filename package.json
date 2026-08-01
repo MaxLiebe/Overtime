@@ -1,0 +1,120 @@
+{
+  "name": "overtime",
+  "version": "0.1.0",
+  "description": "Overtime — Rocket League replay saver with background sync",
+  "productName": "Overtime",
+  "author": "Amalox",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MaxLiebe/Overtime.git"
+  },
+  "type": "module",
+  "main": "dist/electron/main.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:electron": "npm run build && tsc -p electron/tsconfig.json && node scripts/fix-electron-imports.mjs",
+    "fetch-pro-players": "node scripts/fetch-pro-players.mjs",
+    "fetch-pro-players:winnings": "node scripts/fetch-pro-players.mjs --with-winnings",
+    "build:icons": "node scripts/build-icon.mjs && node scripts/fetch-rank-icons.mjs",
+    "electron": "npm run build:electron && electron dist/electron/main.js",
+    "pack": "npm run build:icons && npm run build:electron && electron-builder --win nsis portable",
+    "pack:installer": "npm run build:icons && npm run build:electron && electron-builder --win nsis",
+    "pack:portable": "npm run build:icons && npm run build:electron && electron-builder --win portable",
+    "pack:linux": "npm run build:icons && npm run build:electron && electron-builder --linux AppImage deb",
+    "publish:win": "npm run build:icons && npm run build:electron && electron-builder --win nsis portable -p always",
+    "match-history": "tsx examples/match-history/index.ts",
+    "replay-saver": "tsx examples/replay-saver/index.ts"
+  },
+  "dependencies": {
+    "@jsonjoy.com/json-pack": "^18.28.0",
+    "@kant/node-boxcars": "^0.3.1",
+    "electron-updater": "^6.6.2",
+    "tslib": "^2.8.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/ws": "^8.18.1",
+    "electron": "^35.7.5",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "build": {
+    "appId": "gg.overtime.app",
+    "productName": "Overtime",
+    "icon": "electron/assets/icon.ico",
+    "directories": {
+      "output": "release",
+      "buildResources": "electron/assets"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/renderer/**/*",
+      "electron/assets/**/*",
+      "package.json",
+      "!examples/**",
+      "!scripts/**",
+      "!src/**",
+      "!electron/**/*.ts",
+      "!release/**",
+      "!**/{README.md,.gitignore}"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/@kant/node-boxcars/**"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "MaxLiebe",
+        "repo": "Overtime"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/assets/icon.ico",
+      "signAndEditExecutable": true
+    },
+    "portable": {
+      "artifactName": "Overtime-${version}-portable.exe"
+    },
+    "nsis": {
+      "artifactName": "Overtime-${version}-setup.exe",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "electron/assets/overtime-logo.png",
+      "category": "Game",
+      "artifactName": "Overtime-${version}.${ext}"
+    }
+  }
+}

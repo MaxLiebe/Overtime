@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' https://liquipedia.net https://flagcdn.com; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>Overtime</title>
+    <link rel="icon" type="image/png" href="overtime-logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <img class="brand-logo" src="overtime-logo.png" width="48" height="48" alt="" />
+        <div class="brand-title-group">
+          <div class="brand-title-row">
+            <h1>Overtime</h1>
+            <span class="brand-divider" aria-hidden="true"></span>
+            <p id="status-line">Starting…</p>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div id="import-replay-split" class="import-split">
+          <div class="btn import-split-button">
+            <button id="import-replay" class="import-split-main" type="button">Import Replay</button>
+            <span class="import-split-divider" aria-hidden="true"></span>
+            <button
+              id="import-replay-menu"
+              class="import-split-toggle"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-label="More import options"
+              title="More import options"
+            >
+              ▾
+            </button>
+          </div>
+          <div id="import-replay-dropdown" class="import-dropdown hidden" role="menu">
+            <button
+              id="import-replay-ballchasing"
+              class="import-dropdown-item"
+              type="button"
+              role="menuitem"
+            >
+              <img
+                class="import-dropdown-logo"
+                src="ballchasing-logo.png"
+                width="18"
+                height="18"
+                alt=""
+                aria-hidden="true"
+                decoding="async"
+              />
+              <span>Import from Ballchasing URL</span>
+            </button>
+          </div>
+        </div>
+        <button id="sync-now" class="btn btn-primary">Sync Now</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="replays">Replays</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <div id="game-monitor-bar" class="game-monitor-bar hidden" aria-live="polite">
+      <div class="monitor-pill" id="monitor-rl" title="Rocket League process monitoring">
+        <span class="monitor-dot" aria-hidden="true"></span>
+        <span id="monitor-rl-label">Rocket League not running</span>
+      </div>
+      <div class="monitor-pill hidden" id="monitor-stats" title="Rocket League Stats API connection">
+        <span class="monitor-dot" aria-hidden="true"></span>
+        <span id="monitor-stats-label">Stats API disconnected</span>
+      </div>
+      <div class="monitor-pill hidden" id="monitor-games" title="Games until next mid-session sync">
+        <span id="monitor-games-label">Sync in 0 games</span>
+      </div>
+    </div>
+
+    <main>
+      <section id="replays-panel" class="panel active">
+        <div id="auth-banner" class="auth-banner hidden">
+          <div>
+            <strong>Sign in to sync replays</strong>
+            <p class="hint">
+              Connect your Epic Games account to download match replays automatically.
+            </p>
+          </div>
+          <button id="auth-banner-login" class="btn btn-epic" type="button">
+            Add Epic account
+          </button>
+        </div>
+        <div id="sync-banner" class="sync-banner hidden"></div>
+        <div id="sync-progress-panel" class="sync-progress-panel hidden" aria-live="polite">
+          <div class="sync-progress-header">
+            <span id="sync-progress-status" class="sync-progress-status">Syncing…</span>
+            <div class="sync-progress-overall">
+              <div class="sync-progress-bar" aria-hidden="true">
+                <div id="sync-progress-overall-fill" class="sync-progress-bar-fill"></div>
+              </div>
+            </div>
+          </div>
+          <ul id="sync-download-list" class="sync-download-list"></ul>
+        </div>
+        <div class="panel-toolbar">
+          <input
+            id="replay-search"
+            type="search"
+            placeholder="Search replays…"
+          />
+          <label class="synced-only-filter">
+            <input id="synced-only" type="checkbox" />
+            <span>Synced only</span>
+          </label>
+          <label class="replay-sort-filter">
+            <span>Sort by</span>
+            <select id="replay-sort-by">
+              <option value="match">Match date</option>
+              <option value="import">Import date</option>
+            </select>
+          </label>
+          <span id="replay-count" class="muted">0 replays</span>
+          <button id="toggle-replay-selection" class="btn btn-small" type="button">
+            Select
+          </button>
+        </div>
+        <div id="replay-selection-bar" class="replay-selection-bar hidden">
+          <label class="replay-select-all checkbox">
+            <input id="replay-select-all" type="checkbox" />
+            <span>Select all on page</span>
+          </label>
+          <span id="replay-selection-count" class="muted">0 selected</span>
+          <div class="replay-selection-actions">
+            <button id="clear-replay-selection" class="btn btn-small" type="button">Clear</button>
+            <button id="delete-selected-replays" class="btn btn-danger btn-small" type="button">
+              Delete selected
+            </button>
+          </div>
+        </div>
+        <div id="replay-pagination" class="replay-pagination hidden">
+          <button id="replay-prev" class="btn btn-small" type="button">Previous</button>
+          <span id="replay-page-info" class="muted">Page 1 of 1</span>
+          <button id="replay-next" class="btn btn-small" type="button">Next</button>
+        </div>
+        <div id="replay-library-loading" class="replay-library-loading hidden" aria-live="polite">
+          <span class="inline-spinner" aria-hidden="true"></span>
+          Loading replays…
+        </div>
+        <div id="replay-list" class="replay-list"></div>
+        <div id="replay-drop-overlay" class="replay-drop-overlay hidden" aria-hidden="true">
+          <p>Drop .replay files to import</p>
+        </div>
+        <div id="replay-empty" class="empty-state hidden">
+          <div class="empty-state-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="9" y1="13" x2="15" y2="13" />
+            </svg>
+          </div>
+          <p>No replays yet.</p>
+        </div>
+      </section>
+
+      <section id="settings-panel" class="panel">
+        <div id="settings-form" class="settings-form">
+          <fieldset>
+            <legend>Sync</legend>
+            <p class="hint">
+              Choose how Overtime checks for new replays. Pick the option that matches where you play Rocket League.
+            </p>
+
+            <div class="sync-mode-options" role="radiogroup" aria-label="Sync method">
+              <label class="sync-mode-option">
+                <input type="radio" name="sync-mode" id="sync-mode-process" value="process" />
+                <span>
+                  <span class="sync-mode-option-header">
+                    <span class="sync-mode-option-title">
+                      <span class="sync-mode-option-title-row">
+                        <span class="sync-mode-option-title-text">When Rocket League is running</span>
+                        <span class="sync-mode-badge sync-mode-badge--pc">Recommended for PC</span>
+                      </span>
+                    </span>
+                    <span class="hover-tooltip-wrap sync-option-info-wrap">
+                      <button type="button" class="sync-option-info" aria-label="More about syncing when Rocket League is running">?</button>
+                      <span class="hover-tooltip sync-option-tooltip" role="tooltip">
+                        <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                        <span class="hover-tooltip-panel">
+                          <ul class="sync-option-pros-cons">
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Automatic, no timers to manage</li>
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Can sync when you close the game</li>
+                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Only works if Rocket League is running on this PC</li>
+                          </ul>
+                        </span>
+                      </span>
+                    </span>
+                  </span>
+                  <span class="hint sync-mode-option-desc">
+                    Overtime watches for Rocket League on your computer and syncs when you close the game.
+                  </span>
+                </span>
+              </label>
+              <label class="sync-mode-option">
+                <input type="radio" name="sync-mode" id="sync-mode-interval" value="interval" />
+                <span>
+                  <span class="sync-mode-option-header">
+                    <span class="sync-mode-option-title">
+                      <span class="sync-mode-option-title-row">
+                        <span class="sync-mode-option-title-text">On a schedule</span>
+                        <span class="sync-mode-badge sync-mode-badge--console">Recommended for console</span>
+                      </span>
+                    </span>
+                    <span class="hover-tooltip-wrap sync-option-info-wrap">
+                      <button type="button" class="sync-option-info" aria-label="More about syncing on a schedule">?</button>
+                      <span class="hover-tooltip sync-option-tooltip" role="tooltip">
+                        <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                        <span class="hover-tooltip-panel">
+                          <ul class="sync-option-pros-cons">
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Works even when Overtime cannot tell if Rocket League is running</li>
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Good for console players</li>
+                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Not instant; waits for the next scheduled check</li>
+                          </ul>
+                        </span>
+                      </span>
+                    </span>
+                  </span>
+                  <span class="hint sync-mode-option-desc">
+                    Overtime checks for new replays every few hours, like a timer.
+                  </span>
+                </span>
+              </label>
+              <label class="sync-mode-option">
+                <input type="radio" name="sync-mode" id="sync-mode-manual" value="manual" />
+                <span>
+                  <span class="sync-mode-option-header">
+                    <span class="sync-mode-option-title">Manually</span>
+                    <span class="hover-tooltip-wrap sync-option-info-wrap">
+                      <button type="button" class="sync-option-info" aria-label="More about manual syncing">?</button>
+                      <span class="hover-tooltip sync-option-tooltip" role="tooltip">
+                        <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                        <span class="hover-tooltip-panel">
+                          <ul class="sync-option-pros-cons">
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Full control over when syncing happens</li>
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Nothing runs in the background unless you ask</li>
+                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Replays are not saved until you click Sync</li>
+                          </ul>
+                        </span>
+                      </span>
+                    </span>
+                  </span>
+                  <span class="hint sync-mode-option-desc">
+                    Overtime only syncs when you click the Sync button.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <p class="hint sync-mode-manual-note">
+              You can always sync replays manually with the Sync button, no matter which option you pick.
+            </p>
+
+            <div id="sync-process-settings" class="sync-mode-panel hidden">
+              <p class="hint">
+                Overtime always downloads your replays once when you close Rocket League.
+              </p>
+              <p class="sync-sublegend">While Rocket League is running</p>
+              <div class="sync-mode-options" role="radiogroup" aria-label="Sync while playing">
+                <label class="sync-mode-option sync-mode-option--compact">
+                  <input type="radio" name="process-sync-while-playing" id="process-sync-on-close-only" value="on-close-only" />
+                  <span>
+                    <span class="sync-mode-option-title">Wait until I close the game</span>
+                    <span class="hint sync-mode-option-desc">
+                      Safest option. Overtime will not sync while you are playing, so you stay connected to online matches.
+                    </span>
+                  </span>
+                </label>
+                <label class="sync-mode-option sync-mode-option--compact">
+                  <input type="radio" name="process-sync-while-playing" id="process-sync-after-games" value="after-games" />
+                  <span>
+                    <span class="sync-inline-text sync-mode-option-title">
+                      Sync after
+                      <input id="sync-after-games" type="number" min="1" max="50" step="1" class="inline-number" aria-label="Number of games before sync" />
+                      games
+                    </span>
+                    <span class="hint sync-mode-option-desc">
+                      Syncs during your session after you finish enough online matches. May disconnect you from online play.
+                    </span>
+                    <div id="stats-api-check-row" class="stats-api-panel stats-api-check">
+                      <div class="stats-api-panel-header">
+                        <strong class="stats-api-panel-title">Stats API</strong>
+                        <span id="stats-api-status" class="hint stats-api-status">Checking Stats API configuration…</span>
+                      </div>
+                      <div class="stats-api-check-actions">
+                        <span id="fix-stats-api-wrap" class="hover-tooltip-wrap hidden">
+                          <button type="button" id="fix-stats-api" class="btn btn-primary">
+                            Fix Stats API
+                          </button>
+                          <span class="hover-tooltip" role="tooltip">
+                            <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                            <span class="hover-tooltip-panel">
+                              <span id="fix-stats-api-tooltip-text" class="hover-tooltip-text">
+                                Enables Rocket League to broadcast match events on your PC so Overtime can count finished online games. Restart Rocket League after applying.
+                              </span>
+                              <button type="button" id="stats-api-learn-more" class="btn btn-link hover-tooltip-link">
+                                What is the Stats API?
+                              </button>
+                            </span>
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div id="sync-interval-settings" class="sync-mode-panel hidden">
+              <label class="sync-inline-label">
+                <span class="sync-inline-text">
+                  Check for new replays every
+                  <input id="poll-interval" type="number" min="1" max="720" step="1" class="inline-number inline-number--minutes" aria-label="Minutes between sync checks" />
+                  minutes
+                </span>
+              </label>
+              <p class="hint">
+                Overtime looks for new replays on this timer, whether Rocket League is open or not.
+              </p>
+            </div>
+
+            <label class="checkbox">
+              <input id="start-minimized" type="checkbox" />
+              Start minimized to tray
+            </label>
+            <label class="checkbox">
+              <input id="minimize-on-close" type="checkbox" />
+              Minimize to tray when closing window
+            </label>
+            <label class="checkbox">
+              <input id="launch-at-login" type="checkbox" />
+              Launch at login
+            </label>
+            <label class="checkbox">
+              <input id="auto-update" type="checkbox" />
+              Automatically check for Overtime updates
+            </label>
+            <div class="update-row">
+              <button type="button" id="check-for-updates" class="btn">Check for updates</button>
+              <span id="update-status" class="hint update-status"></span>
+            </div>
+            <p class="hint">
+              Updates download from GitHub Releases when you install Overtime with the setup installer.
+              Portable builds do not auto-update.
+            </p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Replay folder</legend>
+            <div class="path-row">
+              <input id="replay-dir" type="text" readonly />
+              <button type="button" id="browse-replay-dir" class="btn">Browse…</button>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Ballchasing</legend>
+            <label class="checkbox">
+              <input id="auto-upload-ballchasing" type="checkbox" />
+              Automatically upload new replays to Ballchasing
+            </label>
+            <label class="checkbox">
+              <input id="delete-local-after-upload" type="checkbox" />
+              Delete local replay file after Ballchasing upload
+            </label>
+            <p class="hint">
+              Cloud-only replays stay in your library with Ballchasing metadata. Play in-game still works via Ballchasing.
+            </p>
+            <label>
+              API token
+              <div class="token-row">
+                <input
+                  id="ballchasing-token"
+                  type="password"
+                  placeholder="Paste your Ballchasing API token"
+                  autocomplete="off"
+                />
+                <button type="button" id="validate-token" class="btn">Validate</button>
+              </div>
+              <span id="token-status" class="hint"></span>
+            </label>
+            <label>
+              Upload visibility
+              <select id="ballchasing-visibility">
+                <option value="private">Private</option>
+                <option value="unlisted">Unlisted</option>
+                <option value="public">Public</option>
+              </select>
+            </label>
+            <p class="hint">
+              Get your token at
+              <a href="#" id="ballchasing-token-link">ballchasing.com/upload</a>.
+            </p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Epic Games accounts</legend>
+            <p id="auth-status" class="hint">Checking accounts…</p>
+            <div id="accounts-list" class="accounts-list"></div>
+            <div class="auth-actions">
+              <button type="button" id="add-epic-account" class="btn btn-epic">
+                Add Epic account
+              </button>
+            </div>
+          </fieldset>
+        </div>
+      </section>
+    </main>
+
+    <footer class="garage-footer">
+      <div class="garage-footer-stripe" aria-hidden="true"></div>
+      <div class="garage-footer-inner">
+        <div class="garage-footer-brand">
+          <button type="button" class="garage-footer-credit" id="garage-footer-link" data-url="https://tracker.gg/rocket-league/profile/epic/ImAmalox/overview" title="View Amalox on RL Tracker">
+            <img class="garage-footer-car" src="amalox-car.png" alt="" aria-hidden="true" />
+            <span class="garage-footer-copy">
+              <span class="garage-footer-label">Created by</span>
+              <span class="garage-footer-name">Amalox</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            id="support-me"
+            class="garage-footer-support"
+            data-url="https://ko-fi.com/amalox"
+            title="Support Amalox on Ko-fi"
+            aria-label="Support Amalox on Ko-fi"
+          >
+            <img
+              src="social-logos/kofi.svg"
+              width="18"
+              height="18"
+              alt=""
+              aria-hidden="true"
+              decoding="async"
+            />
+            <span>Support me</span>
+          </button>
+        </div>
+        <nav class="garage-footer-social" aria-label="Amalox social links">
+          <button
+            type="button"
+            class="garage-footer-social-link"
+            data-url="https://www.youtube.com/@Amalox"
+            title="YouTube"
+            aria-label="YouTube"
+          >
+            <img src="social-logos/youtube.svg" width="18" height="18" alt="" aria-hidden="true" decoding="async" />
+          </button>
+          <button
+            type="button"
+            class="garage-footer-social-link"
+            data-url="https://x.com/imamalox"
+            title="X (Twitter)"
+            aria-label="X (Twitter)"
+          >
+            <img src="social-logos/x.svg" width="18" height="18" alt="" aria-hidden="true" decoding="async" />
+          </button>
+          <button
+            type="button"
+            class="garage-footer-social-link"
+            data-url="https://metafy.gg/@amalox"
+            title="Metafy"
+            aria-label="Metafy"
+          >
+            <img src="social-logos/metafy.svg" width="18" height="18" alt="" aria-hidden="true" decoding="async" />
+          </button>
+          <button
+            type="button"
+            class="garage-footer-social-link"
+            data-url="https://discord.gg/imamalox"
+            title="Discord (@imamalox)"
+            aria-label="Discord (@imamalox)"
+          >
+            <img src="social-logos/discord.svg" width="18" height="18" alt="" aria-hidden="true" decoding="async" />
+          </button>
+        </nav>
+      </div>
+    </footer>
+
+    <div id="ballchasing-import-dialog" class="dialog hidden" aria-hidden="true">
+      <form id="ballchasing-import-form" class="dialog-panel dialog-panel--ballchasing">
+        <div class="dialog-header">
+          <img
+            class="dialog-logo"
+            src="ballchasing-logo.png"
+            alt=""
+            aria-hidden="true"
+            decoding="async"
+          />
+          <div>
+            <h2>Import from Ballchasing</h2>
+            <p class="hint">
+              Paste a ballchasing.com replay or group URL to download replays into your folder.
+            </p>
+          </div>
+        </div>
+        <label class="dialog-field">
+          <span class="dialog-label">Replay or group URL</span>
+          <input
+            id="ballchasing-import-url"
+            type="url"
+            placeholder="https://ballchasing.com/replay/... or /group/..."
+            autocomplete="off"
+            required
+          />
+        </label>
+        <p id="ballchasing-import-progress" class="hint hidden" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="ballchasing-import-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="ballchasing-import-submit">
+            Import
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div id="epic-device-auth-dialog" class="dialog hidden" aria-hidden="true">
+      <div class="dialog-panel dialog-panel--device-auth">
+        <h2>Sign in with Epic Games</h2>
+        <p class="hint">
+          Your browser should open to Epic's sign-in page. Enter this code when prompted:
+        </p>
+        <p id="epic-device-auth-code" class="epic-device-auth-code" aria-live="polite"></p>
+        <p class="hint epic-device-auth-wait">
+          <span class="inline-spinner" aria-hidden="true"></span>
+          Waiting for you to sign in…
+        </p>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="epic-device-auth-reopen">
+            Reopen Epic page
+          </button>
+          <button type="button" class="btn" id="epic-device-auth-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="rename-replay-dialog" class="dialog hidden" aria-hidden="true">
+      <form id="rename-replay-form" class="dialog-panel">
+        <h2>Rename Replay</h2>
+        <p class="hint">Set the replay name shown in Rocket League.</p>
+        <label class="dialog-field">
+          <span class="dialog-label">Replay name</span>
+          <input
+            id="rename-replay-input"
+            type="text"
+            placeholder="My best comeback"
+            autocomplete="off"
+            required
+          />
+        </label>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="rename-replay-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="rename-replay-submit">
+            Rename
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div id="onboarding-dialog" class="dialog hidden" aria-hidden="true">
+      <div class="dialog-panel dialog-panel--onboarding">
+        <p id="onboarding-progress" class="onboarding-progress hidden" aria-hidden="true"></p>
+
+        <div id="onboarding-step-welcome" class="onboarding-step">
+          <h2>Let's get you started</h2>
+          <p class="hint">
+            Overtime saves your Rocket League replays in the background and keeps them organized in one place.
+          </p>
+          <div class="dialog-actions">
+            <button type="button" class="btn btn-primary" id="onboarding-next">Continue</button>
+          </div>
+        </div>
+
+        <div id="onboarding-step-account" class="onboarding-step hidden">
+          <h2>Add your Epic Games account</h2>
+          <p class="hint onboarding-lead">
+            Sign in with Epic so Overtime can download your replays automatically.
+          </p>
+          <p class="hint onboarding-note">
+            This works for all platforms (PC, PlayStation, Xbox, and Switch). You can add more accounts later in Settings.
+          </p>
+          <div class="dialog-actions">
+            <button type="button" class="btn" id="onboarding-back-account">Back</button>
+            <button type="button" class="btn" id="onboarding-skip-account">Skip for now</button>
+            <button type="button" class="btn btn-primary" id="onboarding-add-account">Add Epic account</button>
+          </div>
+        </div>
+
+        <div id="onboarding-step-skip-confirm" class="onboarding-step hidden">
+          <h2>Skip account linking?</h2>
+          <p class="hint">
+            Without an Epic account, Overtime cannot download replays for you. You can still import replay files yourself and browse your library, but there will be no automatic saves.
+          </p>
+          <p class="hint">You can link an account later in Settings.</p>
+          <div class="dialog-actions">
+            <button type="button" class="btn" id="onboarding-cancel-skip">Go back</button>
+            <button type="button" class="btn btn-primary" id="onboarding-confirm-skip">Skip anyway</button>
+          </div>
+        </div>
+
+        <div id="onboarding-step-sync" class="onboarding-step hidden">
+          <h2>How should replays sync?</h2>
+          <p class="hint onboarding-note">You can change this anytime in Settings.</p>
+          <p class="hint sync-mode-manual-note">
+            You can always sync replays manually with the Sync button, no matter which option you pick.
+          </p>
+          <div class="onboarding-options sync-mode-options" role="radiogroup" aria-label="Sync method">
+            <label class="onboarding-option sync-mode-option">
+              <input type="radio" name="onboarding-sync-mode" id="onboarding-sync-process" value="process" checked />
+              <span>
+                <span class="sync-mode-option-header">
+                  <span class="onboarding-option-title sync-mode-option-title">
+                    <span class="sync-mode-option-title-row">
+                      <span class="sync-mode-option-title-text">When Rocket League is running</span>
+                      <span class="sync-mode-badge sync-mode-badge--pc">Recommended for PC</span>
+                    </span>
+                  </span>
+                  <span class="hover-tooltip-wrap sync-option-info-wrap">
+                    <button type="button" class="sync-option-info" aria-label="More about syncing when Rocket League is running">?</button>
+                    <span class="hover-tooltip sync-option-tooltip" role="tooltip">
+                      <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                      <span class="hover-tooltip-panel">
+                        <ul class="sync-option-pros-cons">
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Automatic, no timers to manage</li>
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Can sync when you close the game</li>
+                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Only works if Rocket League is running on this PC</li>
+                        </ul>
+                      </span>
+                    </span>
+                  </span>
+                </span>
+                <span class="hint onboarding-option-desc sync-mode-option-desc">Overtime watches for Rocket League on your computer.</span>
+              </span>
+            </label>
+            <label class="onboarding-option sync-mode-option">
+              <input type="radio" name="onboarding-sync-mode" id="onboarding-sync-interval" value="interval" />
+              <span>
+                <span class="sync-mode-option-header">
+                  <span class="onboarding-option-title sync-mode-option-title">
+                    <span class="sync-mode-option-title-row">
+                      <span class="sync-mode-option-title-text">On a schedule</span>
+                      <span class="sync-mode-badge sync-mode-badge--console">Recommended for console</span>
+                    </span>
+                  </span>
+                  <span class="hover-tooltip-wrap sync-option-info-wrap">
+                    <button type="button" class="sync-option-info" aria-label="More about syncing on a schedule">?</button>
+                    <span class="hover-tooltip sync-option-tooltip" role="tooltip">
+                      <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                      <span class="hover-tooltip-panel">
+                        <ul class="sync-option-pros-cons">
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Works even when Overtime cannot tell if Rocket League is running</li>
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Good for console players</li>
+                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Not instant; waits for the next scheduled check</li>
+                        </ul>
+                      </span>
+                    </span>
+                  </span>
+                </span>
+                <span class="hint onboarding-option-desc sync-mode-option-desc">Overtime checks for new replays every few hours.</span>
+              </span>
+            </label>
+            <label class="onboarding-option sync-mode-option">
+              <input type="radio" name="onboarding-sync-mode" id="onboarding-sync-manual" value="manual" />
+              <span>
+                <span class="sync-mode-option-header">
+                  <span class="onboarding-option-title sync-mode-option-title">Manually</span>
+                  <span class="hover-tooltip-wrap sync-option-info-wrap">
+                    <button type="button" class="sync-option-info" aria-label="More about manual syncing">?</button>
+                    <span class="hover-tooltip sync-option-tooltip" role="tooltip">
+                      <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                      <span class="hover-tooltip-panel">
+                        <ul class="sync-option-pros-cons">
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Full control over when syncing happens</li>
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Nothing runs in the background unless you ask</li>
+                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Replays are not saved until you click Sync</li>
+                        </ul>
+                      </span>
+                    </span>
+                  </span>
+                </span>
+                <span class="hint onboarding-option-desc sync-mode-option-desc">You sync replays yourself using the Sync button.</span>
+              </span>
+            </label>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="btn" id="onboarding-back-sync">Back</button>
+            <button type="button" class="btn btn-primary" id="onboarding-next-sync">Continue</button>
+          </div>
+        </div>
+
+        <div id="onboarding-step-process" class="onboarding-step hidden">
+          <h2>While Rocket League is running</h2>
+          <p class="hint onboarding-note">Choose when Overtime should download your replays during a play session. It always downloads them once when you close the game.</p>
+          <div class="onboarding-options" role="radiogroup" aria-label="Sync replays while playing">
+            <label class="onboarding-option">
+              <input type="radio" name="onboarding-process-sync" id="onboarding-process-on-close" value="on-close-only" />
+              <span>
+                <span class="onboarding-option-title">Wait until I close the game</span>
+                <span class="hint onboarding-option-desc">Safest option. Replay downloads wait until you are done playing.</span>
+              </span>
+            </label>
+            <label class="onboarding-option">
+              <input type="radio" name="onboarding-process-sync" id="onboarding-process-after-games" value="after-games" checked />
+              <span>
+                <span class="onboarding-option-title onboarding-option-title--inline">
+                  Download replays after
+                  <input id="onboarding-sync-after-games" type="number" min="1" max="50" step="1" class="inline-number" aria-label="Number of games before sync" value="20" />
+                  games
+                </span>
+                <span class="hint onboarding-option-desc">Downloads replays during your session. May disconnect you from online play.</span>
+              </span>
+            </label>
+          </div>
+          <div id="onboarding-stats-api-row" class="stats-api-panel onboarding-stats-api">
+            <div class="stats-api-panel-header">
+              <strong class="stats-api-panel-title">Stats API</strong>
+              <span id="onboarding-stats-api-status" class="hint stats-api-status">Checking Stats API configuration…</span>
+            </div>
+            <div class="stats-api-check-actions">
+              <span id="onboarding-fix-stats-api-wrap" class="hover-tooltip-wrap hidden">
+                <button type="button" id="onboarding-fix-stats-api" class="btn btn-primary">
+                  Fix Stats API
+                </button>
+                <span class="hover-tooltip" role="tooltip">
+                  <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                  <span class="hover-tooltip-panel">
+                    <span id="onboarding-fix-stats-api-tooltip-text" class="hover-tooltip-text">
+                      Enables Rocket League to broadcast match events on your PC so Overtime can count finished online games. Restart Rocket League after applying.
+                    </span>
+                    <button type="button" id="onboarding-stats-api-learn-more" class="btn btn-link hover-tooltip-link">
+                      What is the Stats API?
+                    </button>
+                  </span>
+                </span>
+              </span>
+            </div>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="btn" id="onboarding-back-process">Back</button>
+            <button type="button" class="btn btn-primary" id="onboarding-next-process" disabled>Continue</button>
+          </div>
+        </div>
+
+        <div id="onboarding-step-ballchasing" class="onboarding-step hidden">
+          <h2>Ballchasing.com</h2>
+          <p class="hint onboarding-ballchasing-intro">
+            Ballchasing is a free website where you can upload Rocket League replays, view detailed match stats, and share links with friends.
+          </p>
+          <div class="onboarding-ballchasing-gap" aria-hidden="true"></div>
+          <p class="hint onboarding-ballchasing-token-note">
+            Your API token lets Overtime upload replays to Ballchasing for you. Get it from
+            <button type="button" class="onboarding-ballchasing-link" id="onboarding-ballchasing-upload-link">ballchasing.com/upload</button>.
+            You can skip this and set it up later in Settings.
+          </p>
+          <div class="onboarding-ballchasing-panel">
+            <label class="dialog-field onboarding-ballchasing-field">
+              <span class="dialog-label">API token</span>
+              <div class="token-row">
+                <input
+                  id="onboarding-ballchasing-token"
+                  type="password"
+                  placeholder="Paste your Ballchasing API token"
+                  autocomplete="off"
+                />
+                <button type="button" id="onboarding-validate-ballchasing-token" class="btn">Validate</button>
+              </div>
+              <span id="onboarding-ballchasing-token-status" class="hint onboarding-ballchasing-token-status"></span>
+            </label>
+            <label class="checkbox onboarding-ballchasing-checkbox">
+              <input id="onboarding-auto-upload" type="checkbox" />
+              Automatically upload new replays to Ballchasing
+            </label>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="btn" id="onboarding-back-ballchasing">Back</button>
+            <button type="button" class="btn" id="onboarding-skip-ballchasing">Skip for now</button>
+            <button type="button" class="btn btn-primary" id="onboarding-next-ballchasing">Continue</button>
+          </div>
+        </div>
+
+        <div id="onboarding-step-preferences" class="onboarding-step hidden">
+          <h2>Almost done</h2>
+          <p class="hint onboarding-note">A few optional settings for how Overtime runs on your PC.</p>
+          <div class="onboarding-preferences">
+            <label class="checkbox">
+              <input id="onboarding-start-minimized" type="checkbox" />
+              Start minimized to tray
+            </label>
+            <label class="checkbox">
+              <input id="onboarding-minimize-on-close" type="checkbox" checked />
+              Minimize to tray when closing the window
+            </label>
+            <label class="checkbox">
+              <input id="onboarding-launch-at-login" type="checkbox" />
+              Launch when my PC starts
+            </label>
+            <label class="checkbox">
+              <input id="onboarding-auto-update" type="checkbox" checked />
+              Automatically check for Overtime updates
+            </label>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="btn" id="onboarding-back-preferences">Back</button>
+            <button type="button" class="btn btn-primary" id="onboarding-finish">Finish setup</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="delete-replay-dialog" class="dialog hidden" aria-hidden="true">
+      <div class="dialog-panel dialog-panel--danger">
+        <h2>Delete Replay</h2>
+        <p class="hint" id="delete-replay-message">
+          Delete this replay file from your replay folder?
+        </p>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="delete-replay-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="delete-replay-confirm">
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="remove-local-file-dialog" class="dialog hidden" aria-hidden="true">
+      <div class="dialog-panel dialog-panel--danger">
+        <h2>Remove Local File</h2>
+        <p class="hint" id="remove-local-file-message">
+          Remove the local replay file? The replay will stay in your library as cloud-only.
+        </p>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="remove-local-file-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="remove-local-file-confirm">
+            Remove file
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="replay-menu-portal" class="replay-menu-portal hidden" role="menu" aria-hidden="true"></div>
+    <div id="share-menu-portal" class="replay-menu-portal hidden" role="menu" aria-hidden="true"></div>
+    <div id="pro-player-tooltip-portal" class="pro-player-tooltip-portal hidden" aria-hidden="true"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

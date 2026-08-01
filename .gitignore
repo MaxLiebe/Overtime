@@ -1,0 +1,14 @@
+node_modules/
+dist/
+release/
+electron/assets/icon.ico
+.rlshops
+.replay-saver-state.json
+.DS_Store
+.env
+.env.*
+tokens/
+*.token
+*.session.json
+*.eos.json
+scripts/.pro-players-cache/
