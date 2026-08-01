@@ -371,7 +371,10 @@ function createMainWindow(): BrowserWindow {
       preload: join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      // Keep false: this app uses an ESM preload under package.json "type": "module".
+      // Sandbox mode can fail to load that preload, leaving window.api undefined
+      // and the UI stuck on "Starting…".
+      sandbox: false,
     },
   });
 
@@ -387,8 +390,8 @@ function createMainWindow(): BrowserWindow {
   });
 
   window.webContents.on("will-navigate", (event, url) => {
-    const current = window.webContents.getURL();
-    if (url === current) {
+    // Allow the initial/renderer file load; only block in-page navigations away from the app.
+    if (url.startsWith("file:")) {
       return;
     }
     event.preventDefault();
