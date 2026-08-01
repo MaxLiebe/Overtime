@@ -28,9 +28,7 @@
     "pack:installer": "npm run build:icons && npm run build:electron && electron-builder --win nsis",
     "pack:portable": "npm run build:icons && npm run build:electron && electron-builder --win portable",
     "pack:linux": "npm run build:icons && npm run build:electron && electron-builder --linux AppImage deb",
-    "publish:win": "npm run build:icons && npm run build:electron && electron-builder --win nsis portable -p always",
-    "match-history": "tsx examples/match-history/index.ts",
-    "replay-saver": "tsx examples/replay-saver/index.ts"
+    "publish:win": "npm run build:icons && npm run build:electron && electron-builder --win nsis portable -p always"
   },
   "dependencies": {
     "@jsonjoy.com/json-pack": "^18.28.0",
@@ -45,7 +43,6 @@
     "electron": "^35.7.5",
     "electron-builder": "^25.1.8",
     "png-to-ico": "^2.1.8",
-    "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   },
   "build": {
