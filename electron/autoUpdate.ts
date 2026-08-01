@@ -37,14 +37,68 @@ function notifyUpdate(title: string, body: string): void {
   new Notification({ title, body }).show();
 }
 
+/** electron-builder sets this for Windows portable builds. */
+function isPortableBuild(): boolean {
+  return Boolean(process.env.PORTABLE_EXECUTABLE_DIR);
+}
+
+/** Short user-facing text; never dump raw updater stack traces into the UI. */
+function formatUpdateError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const lower = raw.toLowerCase();
+
+  if (isPortableBuild()) {
+    return "Auto-update needs the setup installer. Portable builds can’t update in place.";
+  }
+
+  if (
+    lower.includes("cannot find") ||
+    lower.includes("no published versions") ||
+    lower.includes("releases.atom") ||
+    lower.includes("404") ||
+    (lower.includes("not found") && (lower.includes("latest") || lower.includes("yml")))
+  ) {
+    return "No update found on GitHub Releases. Use the setup installer, and publish a release that includes latest.yml.";
+  }
+
+  if (
+    lower.includes("401") ||
+    lower.includes("403") ||
+    lower.includes("bad credentials") ||
+    lower.includes("access denied")
+  ) {
+    return "Could not reach GitHub Releases (access denied).";
+  }
+
+  if (lower.includes("enotfound") || lower.includes("net::") || lower.includes("network")) {
+    return "Could not check for updates (network error).";
+  }
+
+  const firstLine = raw.split(/\r?\n/)[0]?.trim() || "Couldn't check for updates.";
+  return firstLine.length > 140 ? `${firstLine.slice(0, 137)}…` : firstLine;
+}
+
+function configureUpdater(): void {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  // Include GitHub pre-releases while Overtime is in early testing.
+  // Stable-only checks use /releases/latest and miss pre-release tags.
+  autoUpdater.allowPrerelease = true;
+  // Explicit feed avoids a missing/mis-baked app-update.yml from older packs.
+  autoUpdater.setFeedURL({
+    provider: "github",
+    owner: "MaxLiebe",
+    repo: "Overtime",
+  });
+}
+
 function attachListeners(): void {
   if (listenersAttached) {
     return;
   }
   listenersAttached = true;
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  configureUpdater();
 
   autoUpdater.on("checking-for-update", () => {
     setStatus({ state: "checking" });
@@ -74,7 +128,7 @@ function attachListeners(): void {
   autoUpdater.on("error", (error) => {
     setStatus({
       state: "error",
-      message: error instanceof Error ? error.message : String(error),
+      message: formatUpdateError(error),
     });
   });
 }
@@ -85,12 +139,21 @@ async function runCheck(): Promise<void> {
     return;
   }
 
+  if (isPortableBuild()) {
+    setStatus({
+      state: "error",
+      message: "Auto-update needs the setup installer. Portable builds can’t update in place.",
+    });
+    return;
+  }
+
   try {
+    configureUpdater();
     await autoUpdater.checkForUpdates();
   } catch (error) {
     setStatus({
       state: "error",
-      message: error instanceof Error ? error.message : String(error),
+      message: formatUpdateError(error),
     });
   }
 }
@@ -127,9 +190,20 @@ export function applyAutoUpdateSetting(enabled: boolean): void {
     return;
   }
 
+  if (isPortableBuild()) {
+    setStatus({
+      state: "error",
+      message: "Auto-update needs the setup installer. Portable builds can’t update in place.",
+    });
+    if (checkTimer) {
+      clearInterval(checkTimer);
+      checkTimer = null;
+    }
+    return;
+  }
+
   attachListeners();
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  configureUpdater();
   void runCheck();
 
   if (checkTimer) {
@@ -149,6 +223,14 @@ export async function checkForUpdatesNow(): Promise<UpdateStatus> {
   const config = getConfig?.();
   if (!config?.autoUpdateEnabled) {
     setStatus({ state: "disabled" });
+    return currentStatus;
+  }
+
+  if (isPortableBuild()) {
+    setStatus({
+      state: "error",
+      message: "Auto-update needs the setup installer. Portable builds can’t update in place.",
+    });
     return currentStatus;
   }
 
