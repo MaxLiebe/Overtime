@@ -1,23 +1,33 @@
-# Security
+# Privacy and security
 
-## Reporting issues
+Short version of what Overtime keeps on your machine, and how to report a problem.
 
-If you find a vulnerability in Overtime, please open a private GitHub security advisory on [MaxLiebe/Overtime](https://github.com/MaxLiebe/Overtime) or contact the maintainer. Do not post exploit details in a public issue until a fix is available.
+## If you find a security issue
 
-## What is stored on your PC
+Please report it privately if you can (a GitHub security advisory on [MaxLiebe/Overtime](https://github.com/MaxLiebe/Overtime), or a direct message to the maintainer).
 
-Overtime keeps local data under the Electron user data directory (for example `%APPDATA%\Overtime` on Windows):
+Don't post a full public write-up with exploit steps until there's a fix out.
 
-- Linked Epic account refresh / session tokens (separate files under `tokens/`)
-- Ballchasing API token (in `config.json`)
-- Replay library metadata and sync state
+## What gets stored on your PC
 
-These files are written with restrictive permissions where the OS supports it. Treat your user data folder like a password store.
+Overtime keeps its data in a normal app data folder. On Windows that's usually `%APPDATA%\Overtime`.
 
-## Public client constants
+That folder can include:
 
-`src/constants.ts` includes Epic / EOS / PsyNet client identifiers that Rocket League clients already expose publicly. They are not Overtime-specific private API keys. Do not treat them as secrets unique to this project.
+- Epic login tokens (so you stay signed in)
+- Your Ballchasing API token, if you added one
+- Replay list / sync info
 
-## Auto-updates
+Don't share that folder or upload it anywhere public. Anyone with it could use your linked accounts.
 
-Installed builds can check [GitHub Releases](https://github.com/MaxLiebe/Overtime/releases) for updates when that option is enabled. Portable builds do not use the same update path.
+Overtime does not take your Epic password. Sign-in goes through Epic's website in your browser.
+
+## Updates
+
+With the **setup installer** and updates enabled, Overtime can pull new versions from [GitHub Releases](https://github.com/MaxLiebe/Overtime/releases).
+
+The **portable** build won't update itself. Grab a new file from Releases when you want a newer version.
+
+## Epic / game login bits
+
+Like a lot of community Rocket League tools, Overtime uses publicly known Epic client IDs to talk to Epic's login systems. Those aren't secret Overtime passwords, and they aren't private keys unique to this project.
