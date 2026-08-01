@@ -2490,9 +2490,8 @@ function renderUpdateStatus(status) {
         "Auto-update is off, or updates are unavailable in this build.";
       break;
     case "error":
-      elements.updateStatus.textContent = status.message
-        ? `Update check failed: ${status.message}`
-        : "Update check failed.";
+      elements.updateStatus.textContent =
+        status.message?.trim() || "Couldn't check for updates.";
       break;
     default:
       elements.updateStatus.textContent = "";
