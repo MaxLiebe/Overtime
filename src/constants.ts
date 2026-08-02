@@ -14,3 +14,7 @@ export const EGS_OAUTH_HOST = "account-public-service-prod03.ol.epicgames.com";
 export const EOS_DEPLOYMENT_ID = "da32ae9c12ae40e8a112c52e1f17f3ba";
 export const EOS_CLIENT_ID = "xyza7891p5D7s9R6Gm6moTHWGloerp7B";
 export const EOS_SECRET = "Knh18du4NVlFs+3uQ+ZPpDCVto0WYf4yXP8+OcwVt1o";
+
+/** Fortnite iOS client — used for long-lived device_auth credentials. */
+export const EGS_DEVICE_AUTH_CLIENT_ID = "3446cd72694c4a4485d81b77adbb2141";
+export const EGS_DEVICE_AUTH_CLIENT_SECRET = "9209d4a5e25a457fb9b07489d313b41a";

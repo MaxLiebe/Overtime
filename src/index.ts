@@ -28,6 +28,20 @@ export {
   refreshAccountTokensIfNeeded,
   TOKEN_KEEPALIVE_INTERVAL_MS,
 } from "./tokenKeepalive.js";
+export {
+  provisionDeviceAuthFromAccessToken,
+  tryProvisionDeviceAuthFromAccessToken,
+  authenticateWithStoredDeviceAuth,
+  refreshViaDeviceAuth,
+  revokeStoredDeviceAuth,
+} from "./deviceAuth.js";
+export {
+  loadDeviceAuthCredentials,
+  writeDeviceAuthCredentials,
+  deleteDeviceAuthCredentials,
+  accountHasDeviceAuth,
+} from "./deviceAuthStore.js";
+export type { EpicDeviceAuthCredentials } from "./types.js";
 export { getMatchHistory, getRecentMatches } from "./matches.js";
 export {
   uploadReplayToBallchasing,

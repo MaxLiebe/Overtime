@@ -4,11 +4,14 @@ import {
   EOS_SECRET,
   EGS_CLIENT_ID,
   EGS_CLIENT_SECRET,
+  EGS_DEVICE_AUTH_CLIENT_ID,
+  EGS_DEVICE_AUTH_CLIENT_SECRET,
   EGS_OAUTH_HOST,
   EGS_USER_AGENT,
 } from "./constants.js";
 import type {
   DeviceAuthResponse,
+  EpicDeviceAuthCredentials,
   EosTokenResponse,
   TokenResponse,
 } from "./types.js";
@@ -141,9 +144,114 @@ export class EGS {
     });
   }
 
-  private async requestToken(params: Record<string, string>): Promise<TokenResponse> {
+  async authenticateWithExchangeCode(
+    exchangeCode: string,
+    clientId = EGS_DEVICE_AUTH_CLIENT_ID,
+    clientSecret = EGS_DEVICE_AUTH_CLIENT_SECRET,
+  ): Promise<TokenResponse> {
+    return this.requestToken(
+      {
+        grant_type: "exchange_code",
+        exchange_code: exchangeCode,
+        token_type: "eg1",
+      },
+      clientId,
+      clientSecret,
+    );
+  }
+
+  async authenticateWithDeviceAuth(
+    credentials: EpicDeviceAuthCredentials,
+  ): Promise<TokenResponse> {
+    return this.requestToken(
+      {
+        grant_type: "device_auth",
+        account_id: credentials.accountId,
+        device_id: credentials.deviceId,
+        secret: credentials.secret,
+        token_type: "eg1",
+      },
+      credentials.clientId,
+      credentials.clientId === EGS_DEVICE_AUTH_CLIENT_ID
+        ? EGS_DEVICE_AUTH_CLIENT_SECRET
+        : credentials.clientId === EGS_CLIENT_ID
+          ? EGS_CLIENT_SECRET
+          : EGS_DEVICE_AUTH_CLIENT_SECRET,
+    );
+  }
+
+  async createDeviceAuth(
+    accessToken: string,
+    accountId: string,
+  ): Promise<EpicDeviceAuthCredentials> {
+    const response = await this.fetchFn(
+      `https://${EGS_OAUTH_HOST}/account/api/public/account/${encodeURIComponent(accountId)}/deviceAuth`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `bearer ${accessToken}`,
+          "User-Agent": EGS_USER_AGENT,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      },
+    );
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`create device auth failed: ${response.status} - ${text}`);
+    }
+
+    const data = JSON.parse(text) as {
+      deviceId?: string;
+      secret?: string;
+      accountId?: string;
+    };
+
+    const deviceId = data.deviceId?.trim();
+    const secret = data.secret?.trim();
+    const resolvedAccountId = data.accountId?.trim() || accountId.trim();
+    if (!deviceId || !secret || !resolvedAccountId) {
+      throw new Error("create device auth failed: incomplete response");
+    }
+
+    return {
+      accountId: resolvedAccountId,
+      deviceId,
+      secret,
+      clientId: EGS_DEVICE_AUTH_CLIENT_ID,
+    };
+  }
+
+  async deleteDeviceAuth(
+    accessToken: string,
+    accountId: string,
+    deviceId: string,
+  ): Promise<void> {
+    const response = await this.fetchFn(
+      `https://${EGS_OAUTH_HOST}/account/api/public/account/${encodeURIComponent(accountId)}/deviceAuth/${encodeURIComponent(deviceId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `bearer ${accessToken}`,
+          "User-Agent": EGS_USER_AGENT,
+        },
+      },
+    );
+
+    if (!response.ok && response.status !== 404) {
+      const text = await response.text();
+      throw new Error(`delete device auth failed: ${response.status} - ${text}`);
+    }
+  }
+
+  private async requestToken(
+    params: Record<string, string>,
+    clientId = EGS_CLIENT_ID,
+    clientSecret = EGS_CLIENT_SECRET,
+  ): Promise<TokenResponse> {
     const body = new URLSearchParams(params);
-    const auth = Buffer.from(`${EGS_CLIENT_ID}:${EGS_CLIENT_SECRET}`).toString("base64");
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
     const response = await this.fetchFn(
       `https://${EGS_OAUTH_HOST}/account/api/oauth/token`,

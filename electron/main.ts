@@ -35,6 +35,7 @@ import {
   migrateLegacyRefreshToken,
   keepAccountTokensAlive,
   TOKEN_KEEPALIVE_INTERVAL_MS,
+  revokeStoredDeviceAuth,
   validateBallchasingToken,
   uploadReplayToBallchasing,
   ballchasingFailureUpdates,
@@ -674,7 +675,13 @@ async function addEpicAccount(_forceAccountPicker = true): Promise<LinkedAccount
 
     pendingFreshEos.set(session.accountId, eosToken);
     accounts = await modifyAccounts(paths.accountsPath, (current) =>
-      upsertAccountFromEos(current, session),
+      upsertAccountFromEos(current, {
+        accountId: session.accountId,
+        displayName: session.displayName,
+        eosRefreshToken: session.eosRefreshToken,
+        eosRefreshExpiresAt: session.eosRefreshExpiresAt,
+        deviceAuth: session.deviceAuth,
+      }),
     );
 
     const linked = accounts.find((account) => account.accountId === session.accountId);
@@ -923,6 +930,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("remove-account", async (_event, accountId: string) => {
+    const existing = accounts.find((account) => account.accountId === accountId);
+    if (existing?.deviceAuth) {
+      await revokeStoredDeviceAuth(existing.deviceAuth);
+    }
     accounts = await modifyAccounts(paths.accountsPath, (current) =>
       removeAccount(current, accountId),
     );

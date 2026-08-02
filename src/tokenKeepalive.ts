@@ -9,6 +9,8 @@ import {
   updateAccount,
   type LinkedAccount,
 } from "./accounts.js";
+import { accountHasDeviceAuth } from "./deviceAuthStore.js";
+import { refreshViaDeviceAuth, tryProvisionDeviceAuthFromAccessToken } from "./deviceAuth.js";
 
 /** How often to scan linked accounts for tokens that need renewing. */
 export const TOKEN_KEEPALIVE_INTERVAL_MS = 30 * 60_000;
@@ -25,12 +27,19 @@ function expiresWithin(expiresAt: string | undefined, leadMs: number): boolean {
   return Number.isFinite(expiresAtMs) && expiresAtMs - leadMs <= Date.now();
 }
 
+function tokensNeedRenewal(account: LinkedAccount): boolean {
+  const eosExpiring =
+    Boolean(account.eosRefreshToken?.trim()) &&
+    expiresWithin(account.eosRefreshExpiresAt, REFRESH_LEAD_MS);
+  const accessExpiring = !accountAccessTokenIsValid(account, REFRESH_LEAD_MS);
+  return eosExpiring || accessExpiring || !accountEosRefreshIsValid(account, REFRESH_LEAD_MS);
+}
+
 function needsEosRefresh(account: LinkedAccount): boolean {
   if (!account.eosRefreshToken?.trim()) {
     return false;
   }
 
-  // Still usable now, but close enough to expiry that we should rotate.
   return (
     accountEosRefreshIsValid(account, 0) &&
     expiresWithin(account.eosRefreshExpiresAt, REFRESH_LEAD_MS)
@@ -46,7 +55,6 @@ function needsEg1Refresh(account: LinkedAccount): boolean {
     !accountEosRefreshIsValid(account, 0) ||
     expiresWithin(account.eosRefreshExpiresAt, REFRESH_LEAD_MS);
 
-  // Access still good and EOS refresh healthy — nothing to do.
   if (accountAccessTokenIsValid(account, REFRESH_LEAD_MS) && !eosMissingOrExpiring) {
     return false;
   }
@@ -80,6 +88,13 @@ async function refreshEg1AndEos(account: LinkedAccount): Promise<Partial<LinkedA
     // EG1 refresh alone still extends the launcher session; EOS can wait for sync.
   }
 
+  if (!accountHasDeviceAuth(account)) {
+    const deviceAuth = await tryProvisionDeviceAuthFromAccessToken(auth.access_token);
+    if (deviceAuth) {
+      updates.deviceAuth = deviceAuth;
+    }
+  }
+
   return updates;
 }
 
@@ -89,6 +104,10 @@ export async function refreshAccountTokensIfNeeded(
 ): Promise<Partial<LinkedAccount> | null> {
   if (!account.enabled) {
     return null;
+  }
+
+  if (accountHasDeviceAuth(account) && tokensNeedRenewal(account)) {
+    return refreshViaDeviceAuth(account);
   }
 
   if (needsEosRefresh(account)) {

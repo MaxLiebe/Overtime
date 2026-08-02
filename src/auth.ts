@@ -3,7 +3,11 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { EGS } from "./egs.js";
 import { PsyNet, PsyNetRPC } from "./psynet.js";
-import type { EosTokenResponse, TokenResponse } from "./types.js";
+import type { EpicDeviceAuthCredentials, EosTokenResponse, TokenResponse } from "./types.js";
+import {
+  authenticateWithStoredDeviceAuth,
+  tryProvisionDeviceAuthFromAccessToken,
+} from "./deviceAuth.js";
 
 const REFRESH_TOKEN_FILE = ".rlshops";
 
@@ -14,6 +18,7 @@ export interface AuthenticatedSession {
   refreshToken: string;
   eosRefreshToken: string;
   eosRefreshExpiresAt?: string;
+  deviceAuth?: EpicDeviceAuthCredentials;
 }
 
 export interface AuthenticateOptions {
@@ -22,6 +27,7 @@ export interface AuthenticateOptions {
   accessTokenExpiresAt?: string;
   eosRefreshToken?: string;
   eosRefreshExpiresAt?: string;
+  deviceAuth?: EpicDeviceAuthCredentials;
   displayName?: string;
   accountId?: string;
   /** Use tokens straight from an auth-code login — avoids a redundant refresh that can break exchange. */
@@ -35,6 +41,8 @@ export interface AuthenticateOptions {
   onTokenRefreshed?: (auth: TokenResponse) => Promise<void>;
   /** Called when EOS refresh succeeds — persists per-account EOS credentials. */
   onEosTokenRefreshed?: (eos: EosTokenResponse) => Promise<void>;
+  /** Called when long-lived device_auth credentials are created or reused. */
+  onDeviceAuthProvisioned?: (deviceAuth: EpicDeviceAuthCredentials) => Promise<void>;
 }
 
 export async function getAuthLoginUrl(options?: { forceLogin?: boolean }): Promise<string> {
@@ -164,7 +172,49 @@ async function authenticateViaEosRefresh(
   try {
     const eosToken = await egs.refreshEosToken(options.eosRefreshToken.trim());
     await options.onEosTokenRefreshed?.(eosToken);
-    return authenticateFromEosToken(eosToken, options.displayName, options.refreshToken ?? "");
+    const session = await authenticateFromEosToken(
+      eosToken,
+      options.displayName,
+      options.refreshToken ?? "",
+    );
+    const deviceAuth =
+      options.deviceAuth ??
+      (await tryProvisionDeviceAuthFromAccessToken(eosToken.access_token));
+    if (deviceAuth) {
+      await options.onDeviceAuthProvisioned?.(deviceAuth);
+      return { ...session, deviceAuth };
+    }
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+async function authenticateViaDeviceAuth(
+  options: AuthenticateOptions,
+): Promise<AuthenticatedSession | null> {
+  if (!options.deviceAuth?.accountId?.trim() || !options.deviceAuth.deviceId?.trim()) {
+    return null;
+  }
+
+  try {
+    const { auth, eos } = await authenticateWithStoredDeviceAuth(options.deviceAuth);
+    await options.onTokenRefreshed?.(auth);
+    await options.onDeviceAuthProvisioned?.(options.deviceAuth);
+    if (eos) {
+      await options.onEosTokenRefreshed?.(eos);
+      const session = await authenticateFromEosToken(
+        eos,
+        options.displayName ?? auth.displayName,
+        auth.refresh_token,
+      );
+      return { ...session, deviceAuth: options.deviceAuth };
+    }
+
+    const session = await connectEpicSession(auth, auth.refresh_token, {
+      onEosTokenRefreshed: options.onEosTokenRefreshed,
+    });
+    return { ...session, deviceAuth: options.deviceAuth };
   } catch {
     return null;
   }
@@ -177,7 +227,8 @@ export async function authenticate(
     options.refreshToken?.trim() ||
       options.tokenResponse ||
       options.accessToken?.trim() ||
-      options.eosRefreshToken?.trim(),
+      options.eosRefreshToken?.trim() ||
+      options.deviceAuth,
   );
   const refreshTokenPath =
     options.refreshTokenPath !== undefined
@@ -191,11 +242,19 @@ export async function authenticate(
 
   if (options.eosTokenResponse) {
     await options.onEosTokenRefreshed?.(options.eosTokenResponse);
-    return authenticateFromEosToken(
+    const session = await authenticateFromEosToken(
       options.eosTokenResponse,
       options.displayName ?? "",
       options.refreshToken ?? "",
     );
+    const deviceAuth =
+      options.deviceAuth ??
+      (await tryProvisionDeviceAuthFromAccessToken(options.eosTokenResponse.access_token));
+    if (deviceAuth) {
+      await options.onDeviceAuthProvisioned?.(deviceAuth);
+      return { ...session, deviceAuth };
+    }
+    return session;
   }
 
   if (options.tokenResponse) {
@@ -221,6 +280,11 @@ export async function authenticate(
       device_id: "",
     };
   } else {
+    const deviceSession = await authenticateViaDeviceAuth(options);
+    if (deviceSession) {
+      return deviceSession;
+    }
+
     const eosSession = await authenticateViaEosRefresh(options);
     if (eosSession) {
       return eosSession;
@@ -271,6 +335,14 @@ export async function authenticate(
     allowRefreshFallback: !usedRefreshGrant,
     onEosTokenRefreshed: options.onEosTokenRefreshed,
   });
+
+  const deviceAuth =
+    options.deviceAuth ?? (await tryProvisionDeviceAuthFromAccessToken(auth.access_token));
+  if (deviceAuth) {
+    await options.onDeviceAuthProvisioned?.(deviceAuth);
+    return { ...session, deviceAuth };
+  }
+
   return session;
 }
 
@@ -358,5 +430,9 @@ export async function completeDeviceAuthorization(
   const egs = new EGS();
   const eosToken = await egs.waitForDeviceAuthorization(device, options);
   const session = await authenticateFromEosToken(eosToken, "");
-  return { eosToken, session };
+  const deviceAuth = await tryProvisionDeviceAuthFromAccessToken(eosToken.access_token);
+  return {
+    eosToken,
+    session: deviceAuth ? { ...session, deviceAuth } : session,
+  };
 }

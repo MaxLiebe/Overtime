@@ -93,6 +93,7 @@ function sessionAccountUpdates(
     eosRefreshToken: session.eosRefreshToken,
     eosRefreshExpiresAt: session.eosRefreshExpiresAt,
     ...(session.refreshToken.trim() ? { refreshToken: session.refreshToken } : {}),
+    ...(session.deviceAuth ? { deviceAuth: session.deviceAuth } : {}),
     lastSyncError: undefined,
   };
 }
@@ -195,24 +196,32 @@ export class SyncService {
             onUpdate?.(state, accounts);
           };
 
+          const persistDeviceAuth = async (deviceAuth: NonNullable<LinkedAccount["deviceAuth"]>) => {
+            await persistAuthTokens({ deviceAuth });
+          };
+
           session = await authenticate(
             freshEos
               ? {
                   eosTokenResponse: freshEos,
                   displayName: account.displayName,
                   accountId: account.accountId,
+                  deviceAuth: account.deviceAuth,
                   onEosTokenRefreshed: async (eos) => {
                     await persistAuthTokens(sessionFromEos(eos));
                   },
+                  onDeviceAuthProvisioned: persistDeviceAuth,
                 }
               : freshAuth
               ? {
                   tokenResponse: freshAuth,
                   displayName: account.displayName,
                   accountId: account.accountId,
+                  deviceAuth: account.deviceAuth,
                   onEosTokenRefreshed: async (eos) => {
                     await persistAuthTokens(sessionFromEos(eos));
                   },
+                  onDeviceAuthProvisioned: persistDeviceAuth,
                 }
               : accountAccessTokenIsValid(account)
                 ? {
@@ -221,16 +230,19 @@ export class SyncService {
                     refreshToken: account.refreshToken,
                     eosRefreshToken: account.eosRefreshToken,
                     eosRefreshExpiresAt: account.eosRefreshExpiresAt,
+                    deviceAuth: account.deviceAuth,
                     displayName: account.displayName,
                     accountId: account.accountId,
                     onEosTokenRefreshed: async (eos) => {
                       await persistAuthTokens(sessionFromEos(eos));
                     },
+                    onDeviceAuthProvisioned: persistDeviceAuth,
                   }
                 : {
                     refreshToken: account.refreshToken,
                     eosRefreshToken: account.eosRefreshToken,
                     eosRefreshExpiresAt: account.eosRefreshExpiresAt,
+                    deviceAuth: account.deviceAuth,
                     displayName: account.displayName,
                     accountId: account.accountId,
                     onTokenRefreshed: async (auth) => {
@@ -243,6 +255,7 @@ export class SyncService {
                     onEosTokenRefreshed: async (eos) => {
                       await persistAuthTokens(sessionFromEos(eos));
                     },
+                    onDeviceAuthProvisioned: persistDeviceAuth,
                   },
           );
 
