@@ -33,6 +33,8 @@ import {
   removeAccount,
   updateAccount,
   migrateLegacyRefreshToken,
+  keepAccountTokensAlive,
+  TOKEN_KEEPALIVE_INTERVAL_MS,
   validateBallchasingToken,
   uploadReplayToBallchasing,
   ballchasingFailureUpdates,
@@ -124,6 +126,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let tokenKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
 let config: AppConfig = { ...DEFAULT_CONFIG };
 let paths = getDefaultPaths("");
 let syncService: SyncService;
@@ -562,6 +565,32 @@ function restartPollTimer(): void {
   pollTimer = setInterval(() => {
     void runSync();
   }, intervalMs);
+}
+
+async function runTokenKeepalive(): Promise<void> {
+  if (!paths.accountsPath || accounts.length === 0) {
+    return;
+  }
+
+  try {
+    accounts = await keepAccountTokensAlive(paths.accountsPath, {
+      isBusy: () => syncService?.isRunning() ?? false,
+    });
+  } catch {
+    // Keepalive is best-effort.
+  }
+}
+
+function startTokenKeepalive(): void {
+  if (tokenKeepaliveTimer) {
+    clearInterval(tokenKeepaliveTimer);
+    tokenKeepaliveTimer = null;
+  }
+
+  void runTokenKeepalive();
+  tokenKeepaliveTimer = setInterval(() => {
+    void runTokenKeepalive();
+  }, TOKEN_KEEPALIVE_INTERVAL_MS);
 }
 
 async function runSync(options?: {
@@ -1508,6 +1537,7 @@ app.whenReady().then(async () => {
   applyLoginItemSettings();
   restartPollTimer();
   startGameWatcher();
+  startTokenKeepalive();
 
   if (
     accounts.some((account) => account.enabled) &&
@@ -1540,5 +1570,8 @@ app.on("before-quit", () => {
   gameWatcher?.stop();
   if (pollTimer) {
     clearInterval(pollTimer);
+  }
+  if (tokenKeepaliveTimer) {
+    clearInterval(tokenKeepaliveTimer);
   }
 });

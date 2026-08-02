@@ -341,6 +341,7 @@ import {
   parseReplayPlayerPlatform,
   isOvertimeDeveloperPlayerId,
   isPsyonixBotPlayerId,
+  OVERTIME_DEV_TRACKER_URL,
   OVERTIME_DEV_YOUTUBE_URL,
   playerMatchesAccount,
   playerMatchesLinkedAccount,
@@ -882,6 +883,10 @@ function teamColorClass(team, players) {
 
 /** @param {string} playerId @param {string} playerName */
 function getTrackerProfileUrl(playerId, playerName) {
+  if (isOvertimeDeveloperPlayerId(playerId)) {
+    return OVERTIME_DEV_TRACKER_URL;
+  }
+
   const parts = playerId.split("|");
   const platform = parts.length === 3 ? parts[0].toLowerCase() : "epic";
   const platformId = parts.length === 3 ? parts[1] : playerId;
@@ -2733,7 +2738,7 @@ let statsApiCheckVersion = 0;
 let lastStatsApiCheckResult = null;
 
 const STATS_API_FIX_TOOLTIP_READY =
-  "Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and count finished online games. Restart Rocket League after applying.";
+  "Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and sync after a set number of games. Restart Rocket League after applying.";
 const STATS_API_FIX_TOOLTIP_GAME_RUNNING =
   "Close Rocket League before applying this fix. Rocket League reads its Stats API settings on startup, so the change only takes effect after a restart anyway.";
 
@@ -2977,6 +2982,59 @@ async function addEpicAccount(button) {
   }
 }
 
+/** @param {HTMLElement} wrap */
+function positionSyncOptionTooltip(wrap) {
+  const tip = wrap.querySelector(".sync-option-tooltip");
+  const anchor = wrap.querySelector(".sync-option-info");
+  if (!(tip instanceof HTMLElement) || !(anchor instanceof HTMLElement)) {
+    return;
+  }
+
+  const rect = anchor.getBoundingClientRect();
+  const margin = 8;
+  const maxWidth = Math.min(280, window.innerWidth - margin * 2);
+  tip.style.position = "fixed";
+  tip.style.right = "auto";
+  tip.style.width = `${maxWidth}px`;
+  tip.style.zIndex = "80";
+
+  const tipWidth = tip.offsetWidth || maxWidth;
+  let left = rect.right - tipWidth;
+  left = Math.max(margin, Math.min(left, window.innerWidth - tipWidth - margin));
+
+  let top = rect.bottom;
+  const tipHeight = tip.offsetHeight || 120;
+  if (top + tipHeight > window.innerHeight - margin) {
+    top = Math.max(margin, rect.top - tipHeight);
+  }
+
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function initSyncOptionTooltips() {
+  const wraps = document.querySelectorAll(".sync-option-info-wrap");
+  for (const wrap of wraps) {
+    if (!(wrap instanceof HTMLElement)) {
+      continue;
+    }
+    const reposition = () => positionSyncOptionTooltip(wrap);
+    wrap.addEventListener("mouseenter", reposition);
+    wrap.addEventListener("focusin", reposition);
+  }
+
+  window.addEventListener("resize", () => {
+    for (const wrap of wraps) {
+      if (!(wrap instanceof HTMLElement)) {
+        continue;
+      }
+      if (wrap.matches(":hover") || wrap.contains(document.activeElement)) {
+        positionSyncOptionTooltip(wrap);
+      }
+    }
+  });
+}
+
 async function bootstrap() {
   try {
     platformInfo = await api.getPlatformInfo();
@@ -3007,6 +3065,8 @@ async function bootstrap() {
     elements.syncBanner.classList.add("error");
     console.error(error);
   }
+
+  initSyncOptionTooltips();
 }
 
 /** @typedef {"welcome" | "account" | "skip-confirm" | "sync" | "process" | "ballchasing" | "preferences"} OnboardingStep */

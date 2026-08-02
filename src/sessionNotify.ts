@@ -2,8 +2,7 @@ import type { LinkedAccount } from "./accounts.js";
 
 export const SESSION_EXPIRED_MESSAGE =
   "Session expired. Re-add this account in Settings.";
-export const SESSION_REVOKED_MESSAGE =
-  "Session expired. Another account sign-in signed this one out. Re-add in Settings.";
+export const SESSION_REVOKED_MESSAGE = SESSION_EXPIRED_MESSAGE;
 
 const SESSION_ERROR_MARKERS = [
   "session expired",

@@ -256,6 +256,9 @@ export class RocketLeagueWatcher {
       onMatchCreated: (matchGuid) => {
         this.handleMatchCreated(matchGuid);
       },
+      onMatchInitialized: (matchGuid) => {
+        this.handleMatchInitialized(matchGuid);
+      },
       onUpdateState: (data) => {
         this.handleUpdateState(data);
       },
@@ -306,6 +309,26 @@ export class RocketLeagueWatcher {
     this.emitTrackedMatches();
   }
 
+  /** Ensure a live row exists without wiping an already-built roster. */
+  private handleMatchInitialized(matchGuid: string): void {
+    if (!this.isLiveTrackingEnabled()) {
+      return;
+    }
+
+    const upper = matchGuid.toUpperCase();
+    if (this.liveMatch?.matchGuid.toUpperCase() === upper) {
+      return;
+    }
+
+    if (this.liveMatch?.status === "live") {
+      // Different guid while live — treat as a new match only via MatchCreated.
+      return;
+    }
+
+    this.liveMatch = createLiveTrackedMatch(upper);
+    this.emitTrackedMatches();
+  }
+
   private handleUpdateState(data: StatsApiUpdateState): void {
     if (!this.isLiveTrackingEnabled()) {
       return;
@@ -315,6 +338,8 @@ export class RocketLeagueWatcher {
     if (!matchGuid) {
       return;
     }
+
+    const previousPlayerCount = this.liveMatch?.players.length ?? 0;
 
     if (!this.liveMatch || this.liveMatch.matchGuid.toUpperCase() !== matchGuid) {
       if (this.liveMatch?.status === "live") {
@@ -330,7 +355,10 @@ export class RocketLeagueWatcher {
     );
 
     const now = Date.now();
-    if (now - this.lastUpdateEmitAt >= UPDATE_STATE_EMIT_MIN_MS) {
+    const rosterChanged =
+      this.liveMatch.players.length !== previousPlayerCount ||
+      this.liveMatch.players.length !== (data.Players?.length ?? 0);
+    if (rosterChanged || now - this.lastUpdateEmitAt >= UPDATE_STATE_EMIT_MIN_MS) {
       this.lastUpdateEmitAt = now;
       this.emitTrackedMatches();
     }

@@ -1490,18 +1490,28 @@ body.replay-selection-mode .replay-card {
   margin-left: 0;
 }
 
+.replay-mvp,
 .replay-pro-tag,
 .replay-dev-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  box-sizing: border-box;
+  height: 1.25rem;
   font-size: 0.68rem;
   font-weight: 700;
-  padding: 2px 6px;
+  line-height: 1;
+  padding: 0 6px;
   border-radius: 3px;
   border: none;
+  font-family: inherit;
+}
+
+.replay-pro-tag,
+.replay-dev-tag {
   color: #fff;
   cursor: pointer;
-  font-family: inherit;
-  line-height: 1.2;
 }
 
 .replay-pro-tag {
@@ -1613,11 +1623,6 @@ body.replay-selection-mode .replay-card {
 }
 
 .replay-mvp {
-  flex-shrink: 0;
-  font-size: 0.68rem;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 3px;
   background: #ffd54f;
   color: #3d2800;
 }
@@ -2299,12 +2304,6 @@ label.checkbox input {
   border-color: var(--rl-blue-bright);
 }
 
-.sync-option-tooltip {
-  right: 0;
-  left: auto;
-  width: min(260px, calc(100vw - 48px));
-}
-
 .sync-option-pros-cons {
   list-style: none;
   margin: 0;
@@ -2502,6 +2501,15 @@ input[type="number"].inline-number--minutes {
   visibility: visible;
   pointer-events: auto;
   transform: translateY(0);
+}
+
+.hover-tooltip.sync-option-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  width: min(280px, calc(100vw - 16px));
+  z-index: 80;
 }
 
 .hover-tooltip-wrap--blocked .btn-primary:disabled {

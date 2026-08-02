@@ -27,6 +27,8 @@ export interface TrackedMatch {
 export interface StatsApiPlayer {
   Name?: string;
   PrimaryId?: string;
+  /** Some Stats API builds use PlayerID instead of / as well as PrimaryId. */
+  PlayerID?: string;
   /** Spectator shortcut; reused when a leaver is replaced by a bot. */
   Shortcut?: number;
   TeamNum?: number;
@@ -82,7 +84,7 @@ export function mapStatsApiPlayers(
     const team = Number(player.TeamNum ?? 0);
     const shortcut = Number(player.Shortcut);
     return {
-      playerId: String(player.PrimaryId ?? "").trim(),
+      playerId: String(player.PrimaryId ?? player.PlayerID ?? "").trim(),
       playerName: String(player.Name ?? "Unknown").trim() || "Unknown",
       team,
       teamColor: teamColorFromNum(team),
@@ -99,25 +101,24 @@ export function mapStatsApiPlayers(
 }
 
 function isTrackedBot(player: SavedReplayPlayer): boolean {
-  return isPsyonixBotPlayerId(player.playerId) || !player.playerId.trim();
+  return isPsyonixBotPlayerId(player.playerId);
 }
 
-function humanIdentityKey(player: SavedReplayPlayer): string | null {
-  if (isTrackedBot(player)) {
-    return null;
+/** Stable key for roster retention across leaves / bot-fill / shortcut renumbers. */
+function trackedPlayerKey(player: SavedReplayPlayer): string {
+  const id = player.playerId.trim().toUpperCase();
+  if (id && !isPsyonixBotPlayerId(id)) {
+    return `id:${id}`;
   }
-  return player.playerId.trim().toUpperCase();
-}
 
-function botIdentityKey(player: SavedReplayPlayer): string {
-  const shortcut =
-    typeof player.shortcut === "number" ? String(player.shortcut) : "x";
-  return `bot:${player.team}:${shortcut}:${player.playerName.trim().toUpperCase()}`;
+  // Bots and id-less players: keep distinct by team + name (shortcut changes on leave).
+  return `name:${player.team}:${player.playerName.trim().toUpperCase()}`;
 }
 
 /**
- * Keep humans who left (or were replaced by casual bot-fill).
- * Stats API reuses Shortcut slots and may change PrimaryId to Unknown|0|0 in place.
+ * Keep anyone once seen for this match.
+ * Ranked leavers disappear from UpdateState with no bot replacement; casual bot-fill
+ * reuses Shortcut and may swap PrimaryId to Unknown|0|0 in place.
  */
 export function mergeTrackedPlayers(
   previous: SavedReplayPlayer[],
@@ -130,53 +131,44 @@ export function mergeTrackedPlayers(
     return previous;
   }
 
-  const humans = new Map<string, SavedReplayPlayer>();
+  const retained = new Map<string, SavedReplayPlayer>();
   const previousByShortcut = new Map<number, SavedReplayPlayer>();
 
   for (const player of previous) {
-    const humanKey = humanIdentityKey(player);
-    if (humanKey) {
-      humans.set(humanKey, player);
-    }
+    retained.set(trackedPlayerKey(player), player);
     if (typeof player.shortcut === "number") {
       previousByShortcut.set(player.shortcut, player);
     }
   }
 
-  const activeBots: SavedReplayPlayer[] = [];
-
   for (const player of incoming) {
-    const humanKey = humanIdentityKey(player);
+    const key = trackedPlayerKey(player);
 
-    // Casual bot-fill (and queue joins) reuse Shortcut. Keep the previous human snapshot.
+    // Slot reused by someone else (bot-fill or renumber) — freeze the previous occupant.
     if (typeof player.shortcut === "number") {
       const previousOccupant = previousByShortcut.get(player.shortcut);
-      const previousHumanKey = previousOccupant
-        ? humanIdentityKey(previousOccupant)
-        : null;
-      if (
-        previousHumanKey &&
-        previousOccupant &&
-        previousHumanKey !== humanKey
-      ) {
-        humans.set(previousHumanKey, previousOccupant);
+      if (previousOccupant) {
+        const previousKey = trackedPlayerKey(previousOccupant);
+        if (previousKey !== key) {
+          retained.set(previousKey, previousOccupant);
+        }
       }
     }
 
-    if (humanKey) {
-      humans.set(humanKey, player);
-    } else {
-      activeBots.push(player);
+    const existing = retained.get(key);
+    // Never overwrite a real platform player with a Psyonix bot under the same key.
+    if (existing && !isTrackedBot(existing) && isTrackedBot(player)) {
+      retained.set(
+        `bot:${player.team}:${player.shortcut ?? "x"}:${player.playerName.trim().toUpperCase()}`,
+        player,
+      );
+      continue;
     }
+
+    retained.set(key, player);
   }
 
-  // Dedupe active bots by identity key (latest wins). Departed humans stay in `humans`.
-  const bots = new Map<string, SavedReplayPlayer>();
-  for (const bot of activeBots) {
-    bots.set(botIdentityKey(bot), bot);
-  }
-
-  return [...humans.values(), ...bots.values()];
+  return [...retained.values()];
 }
 
 function scoresFromUpdate(data: StatsApiUpdateState): {

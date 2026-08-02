@@ -142,7 +142,8 @@ export async function checkStatsApiStatus(
     return {
       status: "ready",
       message: "Stats API is configured.",
-      detail: "Overtime can count finished matches during your session.",
+      detail:
+        "Overtime can track live matches and sync after a set number of games during your session.",
       configPath,
       packetSendRate: config.packetSendRate,
       port: config.port,
@@ -154,7 +155,8 @@ export async function checkStatsApiStatus(
     return {
       status: "needs_fix",
       message: "Stats API is disabled.",
-      detail: "Enable it so Overtime can count finished matches during your session.",
+      detail:
+        "Enable it so Overtime can track live matches and sync after a set number of games.",
       configPath,
       packetSendRate: config.packetSendRate,
       port: config.port,
@@ -165,7 +167,8 @@ export async function checkStatsApiStatus(
   return {
     status: "needs_fix",
     message: "Stats API is not configured.",
-    detail: "Enable it so Overtime can count finished matches during your session.",
+    detail:
+      "Enable it so Overtime can track live matches and sync after a set number of games.",
     configPath,
     canAutoFix: true,
   };

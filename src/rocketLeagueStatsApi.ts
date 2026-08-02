@@ -85,6 +85,8 @@ export interface RocketLeagueStatsClientOptions {
   port?: number;
   reconnectDelayMs?: number;
   onMatchCreated?: (matchGuid: string) => void;
+  /** MatchInitialized should not wipe an in-progress roster. */
+  onMatchInitialized?: (matchGuid: string) => void;
   onUpdateState?: (data: StatsApiUpdateState) => void;
   onMatchEnded?: (matchGuid: string, winnerTeamNum?: number) => void;
   onMatchDestroyed?: (matchGuid: string) => void;
@@ -207,10 +209,18 @@ export class RocketLeagueStatsClient {
 
       const data = parseStatsApiData(envelope.Data);
 
-      if (event === "MatchCreated" || event === "MatchInitialized") {
+      if (event === "MatchCreated") {
         const matchGuid = (data as MatchCreatedData).MatchGuid?.trim();
         if (matchGuid) {
           this.options.onMatchCreated?.(matchGuid);
+        }
+        return;
+      }
+
+      if (event === "MatchInitialized") {
+        const matchGuid = (data as MatchCreatedData).MatchGuid?.trim();
+        if (matchGuid) {
+          this.options.onMatchInitialized?.(matchGuid);
         }
         return;
       }

@@ -193,9 +193,10 @@
                         <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                         <span class="hover-tooltip-panel">
                           <ul class="sync-option-pros-cons">
-                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Automatic, no timers to manage</li>
-                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Can sync when you close the game</li>
-                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Only works if Rocket League is running on this PC</li>
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Fully automatic and seamless syncing of replays</li>
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Syncs automatically after you close the game</li>
+                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Only works on PC</li>
+                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Can force you to reconnect to Epic servers if you sync when the game is still running, barely noticable with the default options though</li>
                           </ul>
                         </span>
                       </span>
@@ -222,9 +223,8 @@
                         <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                         <span class="hover-tooltip-panel">
                           <ul class="sync-option-pros-cons">
-                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Works even when Overtime cannot tell if Rocket League is running</li>
-                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Good for console players</li>
-                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Not instant; waits for the next scheduled check</li>
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Works well for console, or PCs that don't support process detection</li>
+                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Can force you to reconnect to Epic servers if you sync when the game is still running</li>
                           </ul>
                         </span>
                       </span>
@@ -246,9 +246,8 @@
                         <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                         <span class="hover-tooltip-panel">
                           <ul class="sync-option-pros-cons">
-                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Full control over when syncing happens</li>
-                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Nothing runs in the background unless you ask</li>
-                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Replays are not saved until you click Sync</li>
+                            <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Full control over when you sync, only save replays when you want to.</li>
+                            <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Can miss replays if you don't sync every 20 games</li>
                           </ul>
                         </span>
                       </span>
@@ -339,7 +338,7 @@
                     <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                     <span class="hover-tooltip-panel">
                       <span id="fix-stats-api-tooltip-text" class="hover-tooltip-text">
-                        Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and count finished online games. Restart Rocket League after applying.
+                        Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and sync after a set number of games. Restart Rocket League after applying.
                       </span>
                       <button type="button" id="stats-api-learn-more" class="btn btn-link hover-tooltip-link">
                         What is the Stats API?
@@ -395,7 +394,7 @@
               Delete local replay file after Ballchasing upload
             </label>
             <p class="hint">
-              Cloud-only replays stay in your library with Ballchasing metadata. Play in-game still works via Ballchasing.
+              Cloud-only replays stay in your library with match metadata. Play in-game still works.
             </p>
             <label>
               API token
@@ -653,9 +652,10 @@
                       <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                       <span class="hover-tooltip-panel">
                         <ul class="sync-option-pros-cons">
-                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Automatic, no timers to manage</li>
-                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Can sync when you close the game</li>
-                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Only works if Rocket League is running on this PC</li>
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Fully automatic and seamless syncing of replays</li>
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Syncs automatically after you close the game</li>
+                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Only works on PC</li>
+                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Can force you to reconnect to Epic servers if you sync when the game is still running, barely noticable with the default options though</li>
                         </ul>
                       </span>
                     </span>
@@ -680,9 +680,8 @@
                       <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                       <span class="hover-tooltip-panel">
                         <ul class="sync-option-pros-cons">
-                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Works even when Overtime cannot tell if Rocket League is running</li>
-                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Good for console players</li>
-                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Not instant; waits for the next scheduled check</li>
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Works well for console, or PCs that don't support process detection</li>
+                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Can force you to reconnect to Epic servers if you sync when the game is still running</li>
                         </ul>
                       </span>
                     </span>
@@ -702,9 +701,8 @@
                       <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                       <span class="hover-tooltip-panel">
                         <ul class="sync-option-pros-cons">
-                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Full control over when syncing happens</li>
-                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Nothing runs in the background unless you ask</li>
-                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Replays are not saved until you click Sync</li>
+                          <li class="sync-option-pro"><span class="sync-option-sign" aria-hidden="true">+</span>Full control over when you sync, only save replays when you want to.</li>
+                          <li class="sync-option-con"><span class="sync-option-sign" aria-hidden="true">−</span>Can miss replays if you don't sync every 20 games</li>
                         </ul>
                       </span>
                     </span>
@@ -835,7 +833,7 @@
                   <span class="hover-tooltip-bridge" aria-hidden="true"></span>
                   <span class="hover-tooltip-panel">
                     <span id="onboarding-fix-stats-api-tooltip-text" class="hover-tooltip-text">
-                      Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and count finished online games. Restart Rocket League after applying.
+                      Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and sync after a set number of games. Restart Rocket League after applying.
                     </span>
                     <button type="button" id="onboarding-stats-api-learn-more" class="btn btn-link hover-tooltip-link">
                       What is the Stats API?

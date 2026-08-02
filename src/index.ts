@@ -23,6 +23,11 @@ export {
   type PublicLinkedAccount,
 } from "./accounts.js";
 export { authenticate, authenticateFromEosToken, completeDeviceAuthorization, getAuthLoginUrl, hasRefreshToken, loginWithAuthCode, loginWithDeviceCode, startDeviceAuthorization, type DeviceAuthorizationRequest } from "./auth.js";
+export {
+  keepAccountTokensAlive,
+  refreshAccountTokensIfNeeded,
+  TOKEN_KEEPALIVE_INTERVAL_MS,
+} from "./tokenKeepalive.js";
 export { getMatchHistory, getRecentMatches } from "./matches.js";
 export {
   uploadReplayToBallchasing,
@@ -150,6 +155,8 @@ export {
   isOvertimeDeveloperPlayerId,
   isPsyonixBotPlayerId,
   OVERTIME_DEV_STEAM_ID,
+  OVERTIME_DEV_TRACKER_STEAM_ID,
+  OVERTIME_DEV_TRACKER_URL,
   OVERTIME_DEV_YOUTUBE_URL,
   parseReplayPlayerPlatform,
   getSteamCommunityProfileUrl,

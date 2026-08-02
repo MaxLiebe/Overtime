@@ -217,10 +217,16 @@ export function parseReplayPlayerPlatform(playerId: string): ParsedReplayPlayerP
   return { platform: "epic", platformId: playerId.trim() };
 }
 
-/** SteamID64 for Amalox (Overtime developer). */
+/** SteamID64 used to detect Amalox in matches (Overtime developer). */
 export const OVERTIME_DEV_STEAM_ID = "76561198163847840";
 
+/** SteamID64 for Amalox's Tracker.gg profile link. */
+export const OVERTIME_DEV_TRACKER_STEAM_ID = "76561198144145654";
+
 export const OVERTIME_DEV_YOUTUBE_URL = "https://www.youtube.com/@imamalox";
+
+export const OVERTIME_DEV_TRACKER_URL =
+  `https://tracker.gg/rocket-league/profile/steam/${OVERTIME_DEV_TRACKER_STEAM_ID}/overview`;
 
 /** True when this player id is the Overtime developer's Steam account. */
 export function isOvertimeDeveloperPlayerId(playerId: string | undefined | null): boolean {
@@ -229,12 +235,18 @@ export function isOvertimeDeveloperPlayerId(playerId: string | undefined | null)
     return false;
   }
 
-  if (raw.includes(OVERTIME_DEV_STEAM_ID)) {
+  if (
+    raw.includes(OVERTIME_DEV_STEAM_ID) ||
+    raw.includes(OVERTIME_DEV_TRACKER_STEAM_ID)
+  ) {
     return true;
   }
 
   const { platform, platformId } = parseReplayPlayerPlatform(raw);
-  return platform === "steam" && platformId === OVERTIME_DEV_STEAM_ID;
+  return (
+    platform === "steam" &&
+    (platformId === OVERTIME_DEV_STEAM_ID || platformId === OVERTIME_DEV_TRACKER_STEAM_ID)
+  );
 }
 
 /** Psyonix bots in private matches share PrimaryId `Unknown|0|0`. */

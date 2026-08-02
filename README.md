@@ -5,8 +5,8 @@
 <h1 align="center">Overtime</h1>
 
 <p align="center">
-  A small Windows app that saves your Rocket League replays so they don't disappear.<br>
-  Optional Ballchasing upload if you want that too.
+  Overtime is the ultimate match tracker and replay manager for any Rocket League player!<br>
+  Supports both PC and console, and completely free and open source.
 </p>
 
 <p align="center">
@@ -24,27 +24,22 @@
 </p>
 
 ---
-
-## Why this exists
-
-Rocket League only keeps a handful of recent replays. Play enough games and the older ones get deleted.
-
-Overtime runs on your PC, grabs those replays, and keeps them. You get a simple library to look through them, rename stuff, delete what you don't want, and optionally send them to [Ballchasing](https://ballchasing.com).
-
-## What it can do
+## Features
 
 - Save replays automatically in the background
-- Sit in the system tray so it's not always on screen
-- Browse, search, rename, and delete replays
-- Upload to Ballchasing (one by one, or automatically)
-- Sync when the game closes, on a timer, or only when you hit Sync
-- Link more than one Epic account
+- Quick access to opponent's platform data and RL tracker, even during matches!
+- Easily browse, search, rename, import, share and delete replays
+- One-click uploads to Ballchasing.com (or automatically!)
+- Optionally delete replays after they are uploaded to prevent clutter
+- Support for multiple accounts
+- Automatic pro detection with direct links to Liquipedia profiles
 - Auto-update, if you used the installer
+- Lightweight and standalone, no to minimal performance impact
 
 ## How to install
 
 1. Open the [latest release](https://github.com/MaxLiebe/Overtime/releases/latest).
-2. Download **`Overtime-*-setup.exe`** (that's the normal installer).
+2. Download **`Overtime-*-setup.exe`**.
 3. Run it, then open Overtime from the Start menu.
 
 There's also a portable `.exe` if you just want to try it without installing. Portable builds don't auto-update, so the installer is the better default.
@@ -59,15 +54,6 @@ Overtime starts with a short setup:
 4. Set a couple of preferences and finish
 
 After that it can sync on its own. New replays show up in the library.
-
-## Day to day
-
-- **Sync Now** checks for new replays right away
-- **Import** lets you add `.replay` files from disk, or pull one in from a Ballchasing URL
-- **Settings** is where sync mode, Ballchasing, tray options, and updates live
-- Closing the window can leave it running in the tray (that's configurable)
-
-If things look weird after a Rocket League patch, try Sync again or restart Overtime.
 
 ## Ballchasing
 
