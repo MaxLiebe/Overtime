@@ -89,6 +89,15 @@ export interface DeviceAuthResponse {
   interval: number;
 }
 
+/** Long-lived Epic device_auth credentials (account_id + device_id + secret). */
+export interface EpicDeviceAuthCredentials {
+  accountId: string;
+  deviceId: string;
+  secret: string;
+  /** OAuth client that created/owns these credentials. */
+  clientId: string;
+}
+
 export interface MatchSkills {
   Mu: number | null;
   Sigma: number | null;

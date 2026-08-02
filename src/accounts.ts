@@ -1,7 +1,13 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { EosTokenResponse, TokenResponse } from "./types.js";
+import type { EpicDeviceAuthCredentials, EosTokenResponse, TokenResponse } from "./types.js";
 import { SESSION_REVOKED_MESSAGE } from "./sessionNotify.js";
+import {
+  accountHasDeviceAuth,
+  deleteDeviceAuthCredentials,
+  loadDeviceAuthCredentials,
+  writeDeviceAuthCredentials,
+} from "./deviceAuthStore.js";
 
 export interface LinkedAccount {
   accountId: string;
@@ -13,6 +19,8 @@ export interface LinkedAccount {
   /** EOS refresh token — independent per account, used when launcher refresh is revoked. */
   eosRefreshToken?: string;
   eosRefreshExpiresAt?: string;
+  /** Long-lived device_auth credentials (never sent to the renderer). */
+  deviceAuth?: EpicDeviceAuthCredentials;
   addedAt: string;
   enabled: boolean;
   platformPlayerId?: string;
@@ -29,7 +37,10 @@ export type PublicLinkedAccount = Omit<
   | "accessTokenExpiresAt"
   | "eosRefreshToken"
   | "eosRefreshExpiresAt"
->;
+  | "deviceAuth"
+> & {
+  hasDeviceAuth?: boolean;
+};
 
 export function toPublicAccount(account: LinkedAccount): PublicLinkedAccount {
   const {
@@ -38,9 +49,13 @@ export function toPublicAccount(account: LinkedAccount): PublicLinkedAccount {
     accessTokenExpiresAt: _accessTokenExpiresAt,
     eosRefreshToken: _eosRefreshToken,
     eosRefreshExpiresAt: _eosRefreshExpiresAt,
+    deviceAuth: _deviceAuth,
     ...publicAccount
   } = account;
-  return publicAccount;
+  return {
+    ...publicAccount,
+    hasDeviceAuth: accountHasDeviceAuth(account),
+  };
 }
 
 export function toPublicAccounts(accounts: LinkedAccount[]): PublicLinkedAccount[] {
@@ -284,7 +299,8 @@ export function accountCanAuthenticate(account: LinkedAccount): boolean {
   return (
     accountAccessTokenIsValid(account) ||
     Boolean(account.refreshToken.trim()) ||
-    accountEosRefreshIsValid(account)
+    accountEosRefreshIsValid(account) ||
+    accountHasDeviceAuth(account)
   );
 }
 
@@ -300,7 +316,9 @@ export async function invalidateOtherAccountSessions(
       }
 
       const stillUsable =
-        accountAccessTokenIsValid(account) || accountEosRefreshIsValid(account);
+        accountAccessTokenIsValid(account) ||
+        accountEosRefreshIsValid(account) ||
+        accountHasDeviceAuth(account);
 
       return {
         ...account,
@@ -321,6 +339,7 @@ async function hydrateAccounts(accountsPath: string, stored: StoredAccount[]): P
     const refreshToken = fromFile ?? entry.refreshToken?.trim() ?? "";
     const session = await loadAccountSession(accountsPath, entry.accountId);
     const eos = await loadAccountEosRefresh(accountsPath, entry.accountId);
+    const deviceAuth = await loadDeviceAuthCredentials(accountsPath, entry.accountId);
 
     if (!fromFile && refreshToken) {
       await writeAccountRefreshTokenFile(accountsPath, entry.accountId, refreshToken);
@@ -333,6 +352,7 @@ async function hydrateAccounts(accountsPath: string, stored: StoredAccount[]): P
       accessTokenExpiresAt: session?.accessTokenExpiresAt ?? entry.accessTokenExpiresAt,
       eosRefreshToken: eos?.eosRefreshToken ?? entry.eosRefreshToken,
       eosRefreshExpiresAt: eos?.eosRefreshExpiresAt ?? entry.eosRefreshExpiresAt,
+      deviceAuth: deviceAuth ?? undefined,
     });
   }
 
@@ -363,6 +383,7 @@ async function saveAccountsMetadata(
       accessTokenExpiresAt: _accessTokenExpiresAt,
       eosRefreshToken: _eosRefreshToken,
       eosRefreshExpiresAt: _eosRefreshExpiresAt,
+      deviceAuth: _deviceAuth,
       ...account
     }) => account,
   );
@@ -386,6 +407,7 @@ async function persistAccountTokens(
       await deleteAccountRefreshToken(accountsPath, accountId);
       await deleteAccountSession(accountsPath, accountId);
       await deleteAccountEosRefresh(accountsPath, accountId);
+      await deleteDeviceAuthCredentials(accountsPath, accountId);
     }
   }
 
@@ -425,6 +447,22 @@ async function persistAccountTokens(
         });
       } else {
         await deleteAccountEosRefresh(accountsPath, account.accountId);
+      }
+    }
+
+    const previousDevice = previousAccount?.deviceAuth;
+    const nextDevice = account.deviceAuth;
+    const deviceChanged =
+      previousDevice?.deviceId !== nextDevice?.deviceId ||
+      previousDevice?.secret !== nextDevice?.secret ||
+      previousDevice?.clientId !== nextDevice?.clientId ||
+      previousDevice?.accountId !== nextDevice?.accountId;
+
+    if (deviceChanged) {
+      if (accountHasDeviceAuth(account) && nextDevice) {
+        await writeDeviceAuthCredentials(accountsPath, nextDevice);
+      } else {
+        await deleteDeviceAuthCredentials(accountsPath, account.accountId);
       }
     }
   }
@@ -492,6 +530,7 @@ export function upsertAccountFromEos(
     displayName: string;
     eosRefreshToken: string;
     eosRefreshExpiresAt?: string;
+    deviceAuth?: EpicDeviceAuthCredentials;
   },
 ): LinkedAccount[] {
   const next = accounts.filter((account) => account.accountId !== session.accountId);
@@ -509,6 +548,7 @@ export function upsertAccountFromEos(
     accessTokenExpiresAt: existing?.accessTokenExpiresAt,
     eosRefreshToken: eosSession.eosRefreshToken,
     eosRefreshExpiresAt: eosSession.eosRefreshExpiresAt,
+    deviceAuth: session.deviceAuth ?? existing?.deviceAuth,
     addedAt: existing?.addedAt ?? new Date().toISOString(),
     enabled: existing?.enabled ?? true,
     platformPlayerId: existing?.platformPlayerId,
