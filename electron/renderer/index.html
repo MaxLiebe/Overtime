@@ -291,30 +291,7 @@
                     <span class="hint sync-mode-option-desc">
                       Syncs during your session after you finish enough online matches. May disconnect you from online play.
                     </span>
-                    <div id="stats-api-check-row" class="stats-api-panel stats-api-check">
-                      <div class="stats-api-panel-header">
-                        <strong class="stats-api-panel-title">Stats API</strong>
-                        <span id="stats-api-status" class="hint stats-api-status">Checking Stats API configuration…</span>
-                      </div>
-                      <div class="stats-api-check-actions">
-                        <span id="fix-stats-api-wrap" class="hover-tooltip-wrap hidden">
-                          <button type="button" id="fix-stats-api" class="btn btn-primary">
-                            Fix Stats API
-                          </button>
-                          <span class="hover-tooltip" role="tooltip">
-                            <span class="hover-tooltip-bridge" aria-hidden="true"></span>
-                            <span class="hover-tooltip-panel">
-                              <span id="fix-stats-api-tooltip-text" class="hover-tooltip-text">
-                                Enables Rocket League to broadcast match events on your PC so Overtime can count finished online games. Restart Rocket League after applying.
-                              </span>
-                              <button type="button" id="stats-api-learn-more" class="btn btn-link hover-tooltip-link">
-                                What is the Stats API?
-                              </button>
-                            </span>
-                          </span>
-                        </span>
-                      </div>
-                    </div>
+                    <div id="stats-api-host-after-games"></div>
                   </span>
                 </label>
               </div>
@@ -331,6 +308,46 @@
               <p class="hint">
                 Overtime looks for new replays on this timer, whether Rocket League is open or not.
               </p>
+            </div>
+
+            <div id="live-match-tracking-row" class="live-match-tracking-row">
+              <label class="checkbox">
+                <input id="live-match-tracking" type="checkbox" />
+                <span class="checkbox-label-with-badge">
+                  <span>Track live matches</span>
+                  <span class="sync-mode-badge sync-mode-badge--pc">PC only</span>
+                </span>
+              </label>
+              <p class="hint">
+                Lists the current game and finished matches in your library until their replay
+                files are synced. Requires the Rocket League Stats API. No replay actions until then.
+              </p>
+              <div id="stats-api-host-live-tracking"></div>
+            </div>
+
+            <div id="stats-api-check-row" class="stats-api-panel stats-api-check hidden">
+              <div class="stats-api-panel-header">
+                <strong class="stats-api-panel-title">Stats API</strong>
+                <span id="stats-api-status" class="hint stats-api-status">Checking Stats API configuration…</span>
+              </div>
+              <div class="stats-api-check-actions">
+                <span id="fix-stats-api-wrap" class="hover-tooltip-wrap hidden">
+                  <button type="button" id="fix-stats-api" class="btn btn-primary">
+                    Fix Stats API
+                  </button>
+                  <span class="hover-tooltip" role="tooltip">
+                    <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                    <span class="hover-tooltip-panel">
+                      <span id="fix-stats-api-tooltip-text" class="hover-tooltip-text">
+                        Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and count finished online games. Restart Rocket League after applying.
+                      </span>
+                      <button type="button" id="stats-api-learn-more" class="btn btn-link hover-tooltip-link">
+                        What is the Stats API?
+                      </button>
+                    </span>
+                  </span>
+                </span>
+              </div>
             </div>
 
             <label class="checkbox">
@@ -455,7 +472,7 @@
           <button
             type="button"
             class="garage-footer-social-link"
-            data-url="https://www.youtube.com/@Amalox"
+            data-url="https://www.youtube.com/@imamalox"
             title="YouTube"
             aria-label="YouTube"
           >
@@ -726,30 +743,7 @@
               </span>
             </label>
           </div>
-          <div id="onboarding-stats-api-row" class="stats-api-panel onboarding-stats-api">
-            <div class="stats-api-panel-header">
-              <strong class="stats-api-panel-title">Stats API</strong>
-              <span id="onboarding-stats-api-status" class="hint stats-api-status">Checking Stats API configuration…</span>
-            </div>
-            <div class="stats-api-check-actions">
-              <span id="onboarding-fix-stats-api-wrap" class="hover-tooltip-wrap hidden">
-                <button type="button" id="onboarding-fix-stats-api" class="btn btn-primary">
-                  Fix Stats API
-                </button>
-                <span class="hover-tooltip" role="tooltip">
-                  <span class="hover-tooltip-bridge" aria-hidden="true"></span>
-                  <span class="hover-tooltip-panel">
-                    <span id="onboarding-fix-stats-api-tooltip-text" class="hover-tooltip-text">
-                      Enables Rocket League to broadcast match events on your PC so Overtime can count finished online games. Restart Rocket League after applying.
-                    </span>
-                    <button type="button" id="onboarding-stats-api-learn-more" class="btn btn-link hover-tooltip-link">
-                      What is the Stats API?
-                    </button>
-                  </span>
-                </span>
-              </span>
-            </div>
-          </div>
+          <div id="onboarding-stats-api-host-process"></div>
           <div class="dialog-actions">
             <button type="button" class="btn" id="onboarding-back-process">Back</button>
             <button type="button" class="btn btn-primary" id="onboarding-next-process" disabled>Continue</button>
@@ -813,6 +807,43 @@
               <input id="onboarding-auto-update" type="checkbox" checked />
               Automatically check for Overtime updates
             </label>
+            <div id="onboarding-live-match-tracking-row" class="onboarding-live-match-tracking-row">
+              <label class="checkbox">
+                <input id="onboarding-live-match-tracking" type="checkbox" checked />
+                <span class="checkbox-label-with-badge">
+                  <span>Track live matches</span>
+                  <span class="sync-mode-badge sync-mode-badge--pc">PC only</span>
+                </span>
+              </label>
+              <p class="hint onboarding-note">
+                Lists the current game and finished matches in your library until you sync the real replay files. Requires the Rocket League Stats API.
+              </p>
+              <div id="onboarding-stats-api-host-live-tracking"></div>
+            </div>
+          </div>
+          <div id="onboarding-stats-api-row" class="stats-api-panel onboarding-stats-api hidden">
+            <div class="stats-api-panel-header">
+              <strong class="stats-api-panel-title">Stats API</strong>
+              <span id="onboarding-stats-api-status" class="hint stats-api-status">Checking Stats API configuration…</span>
+            </div>
+            <div class="stats-api-check-actions">
+              <span id="onboarding-fix-stats-api-wrap" class="hover-tooltip-wrap hidden">
+                <button type="button" id="onboarding-fix-stats-api" class="btn btn-primary">
+                  Fix Stats API
+                </button>
+                <span class="hover-tooltip" role="tooltip">
+                  <span class="hover-tooltip-bridge" aria-hidden="true"></span>
+                  <span class="hover-tooltip-panel">
+                    <span id="onboarding-fix-stats-api-tooltip-text" class="hover-tooltip-text">
+                      Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and count finished online games. Restart Rocket League after applying.
+                    </span>
+                    <button type="button" id="onboarding-stats-api-learn-more" class="btn btn-link hover-tooltip-link">
+                      What is the Stats API?
+                    </button>
+                  </span>
+                </span>
+              </span>
+            </div>
           </div>
           <div class="dialog-actions">
             <button type="button" class="btn" id="onboarding-back-preferences">Back</button>

@@ -217,6 +217,43 @@ export function parseReplayPlayerPlatform(playerId: string): ParsedReplayPlayerP
   return { platform: "epic", platformId: playerId.trim() };
 }
 
+/** SteamID64 for Amalox (Overtime developer). */
+export const OVERTIME_DEV_STEAM_ID = "76561198163847840";
+
+export const OVERTIME_DEV_YOUTUBE_URL = "https://www.youtube.com/@imamalox";
+
+/** True when this player id is the Overtime developer's Steam account. */
+export function isOvertimeDeveloperPlayerId(playerId: string | undefined | null): boolean {
+  const raw = String(playerId ?? "").trim();
+  if (!raw) {
+    return false;
+  }
+
+  if (raw.includes(OVERTIME_DEV_STEAM_ID)) {
+    return true;
+  }
+
+  const { platform, platformId } = parseReplayPlayerPlatform(raw);
+  return platform === "steam" && platformId === OVERTIME_DEV_STEAM_ID;
+}
+
+/** Psyonix bots in private matches share PrimaryId `Unknown|0|0`. */
+export function isPsyonixBotPlayerId(playerId: string | undefined | null): boolean {
+  const normalized = String(playerId ?? "")
+    .trim()
+    .toUpperCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized === "UNKNOWN|0|0" || normalized === "UNKNOWN") {
+    return true;
+  }
+
+  const parts = normalized.split("|");
+  return parts[0] === "UNKNOWN";
+}
+
 export function playerMatchesAccount(playerId: string, accountId: string): boolean {
   if (!playerId || !accountId) {
     return false;

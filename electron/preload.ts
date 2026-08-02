@@ -6,6 +6,7 @@ import type {
   PublicLinkedAccount,
   ReplayLibraryResult,
   SyncProgressEvent,
+  TrackedMatch,
 } from "rlapi";
 
 export type UpdateStatus =
@@ -22,6 +23,7 @@ export interface ElectronApi {
   getPlatformInfo: () => Promise<{ platform: string; inGameReplaySupported: boolean }>;
   getConfig: () => Promise<PublicAppConfig>;
   getGameMonitorState: () => Promise<import("rlapi").GameMonitorState>;
+  getTrackedMatches: () => Promise<TrackedMatch[]>;
   setConfig: (partial: Partial<AppConfig>) => Promise<PublicAppConfig>;
   getState: () => Promise<AppState>;
   getAccounts: () => Promise<PublicLinkedAccount[]>;
@@ -106,6 +108,7 @@ export interface ElectronApi {
   onConfigUpdated: (callback: (config: PublicAppConfig) => void) => () => void;
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
   onGameMonitorUpdated: (callback: (state: import("rlapi").GameMonitorState) => void) => () => void;
+  onTrackedMatchesUpdated: (callback: (matches: TrackedMatch[]) => void) => () => void;
   onSyncStarted: (callback: () => void) => () => void;
   onSyncCompleted: (callback: () => void) => () => void;
   onSyncError: (callback: (message: string) => void) => () => void;
@@ -133,6 +136,7 @@ const api: ElectronApi = {
   getPlatformInfo: () => ipcRenderer.invoke("get-platform-info"),
   getConfig: () => ipcRenderer.invoke("get-config"),
   getGameMonitorState: () => ipcRenderer.invoke("get-game-monitor-state"),
+  getTrackedMatches: () => ipcRenderer.invoke("get-tracked-matches"),
   setConfig: (partial) => ipcRenderer.invoke("set-config", partial),
   getState: () => ipcRenderer.invoke("get-state"),
   getAccounts: () => ipcRenderer.invoke("get-accounts"),
@@ -206,6 +210,12 @@ const api: ElectronApi = {
       callback(monitor);
     ipcRenderer.on("game-monitor-updated", listener);
     return () => ipcRenderer.removeListener("game-monitor-updated", listener);
+  },
+  onTrackedMatchesUpdated: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, matches: TrackedMatch[]) =>
+      callback(matches);
+    ipcRenderer.on("tracked-matches-updated", listener);
+    return () => ipcRenderer.removeListener("tracked-matches-updated", listener);
   },
   onSyncStarted: (callback) => {
     const listener = () => callback();

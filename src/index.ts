@@ -84,6 +84,17 @@ export {
   type RocketLeagueStatsClientOptions,
   type StatsApiEnvelope,
 } from "./rocketLeagueStatsApi.js";
+export {
+  applyUpdateStateToTrackedMatch,
+  createLiveTrackedMatch,
+  isTrackedReplayView,
+  markTrackedMatchEnded,
+  mergeTrackedPlayers,
+  trackedMatchToReplayView,
+  type TrackedMatch,
+  type TrackedMatchStatus,
+  type StatsApiUpdateState,
+} from "./trackedMatch.js";
 export { RocketLeagueWatcher, type RocketLeagueWatcherOptions } from "./rocketLeagueWatcher.js";
 export {
   buildGameMonitorState,
@@ -105,6 +116,7 @@ export {
 export {
   getDefaultSyncMode,
   getProcessGamesThreshold,
+  isLiveMatchTrackingEnabled,
   normalizeSyncConfig,
   usesIntervalSync,
   usesManualSync,
@@ -135,6 +147,10 @@ export {
   discoverPlatformPlayerId,
   discoverPlatformPlayerIdFromReplays,
   resolveLocalPlayerInMatch,
+  isOvertimeDeveloperPlayerId,
+  isPsyonixBotPlayerId,
+  OVERTIME_DEV_STEAM_ID,
+  OVERTIME_DEV_YOUTUBE_URL,
   parseReplayPlayerPlatform,
   getSteamCommunityProfileUrl,
   type ParsedReplayPlayerPlatform,

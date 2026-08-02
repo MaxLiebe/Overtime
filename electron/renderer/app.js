@@ -76,6 +76,8 @@ const elements = {
   processSyncAfterGames: document.getElementById("process-sync-after-games"),
   syncAfterGames: document.getElementById("sync-after-games"),
   statsApiCheckRow: document.getElementById("stats-api-check-row"),
+  statsApiHostAfterGames: document.getElementById("stats-api-host-after-games"),
+  statsApiHostLiveTracking: document.getElementById("stats-api-host-live-tracking"),
   fixStatsApiWrap: document.getElementById("fix-stats-api-wrap"),
   fixStatsApi: document.getElementById("fix-stats-api"),
   fixStatsApiTooltipText: document.getElementById("fix-stats-api-tooltip-text"),
@@ -92,6 +94,8 @@ const elements = {
   minimizeOnClose: document.getElementById("minimize-on-close"),
   launchAtLogin: document.getElementById("launch-at-login"),
   autoUpdate: document.getElementById("auto-update"),
+  liveMatchTracking: document.getElementById("live-match-tracking"),
+  liveMatchTrackingRow: document.getElementById("live-match-tracking-row"),
   checkForUpdates: document.getElementById("check-for-updates"),
   updateStatus: document.getElementById("update-status"),
   replayDir: document.getElementById("replay-dir"),
@@ -151,6 +155,10 @@ const elements = {
   onboardingProcessAfterGames: document.getElementById("onboarding-process-after-games"),
   onboardingSyncAfterGames: document.getElementById("onboarding-sync-after-games"),
   onboardingStatsApiRow: document.getElementById("onboarding-stats-api-row"),
+  onboardingStatsApiHostProcess: document.getElementById("onboarding-stats-api-host-process"),
+  onboardingStatsApiHostLiveTracking: document.getElementById(
+    "onboarding-stats-api-host-live-tracking",
+  ),
   onboardingStatsApiStatus: document.getElementById("onboarding-stats-api-status"),
   onboardingFixStatsApiWrap: document.getElementById("onboarding-fix-stats-api-wrap"),
   onboardingFixStatsApi: document.getElementById("onboarding-fix-stats-api"),
@@ -170,6 +178,8 @@ const elements = {
   onboardingMinimizeOnClose: document.getElementById("onboarding-minimize-on-close"),
   onboardingLaunchAtLogin: document.getElementById("onboarding-launch-at-login"),
   onboardingAutoUpdate: document.getElementById("onboarding-auto-update"),
+  onboardingLiveMatchTracking: document.getElementById("onboarding-live-match-tracking"),
+  onboardingLiveMatchTrackingRow: document.getElementById("onboarding-live-match-tracking-row"),
 };
 
 /** @type {SavedReplayRecord | null} */
@@ -265,6 +275,16 @@ function renderPlayerPlatformIcon(playerId) {
 
 /** @param {import('../../dist/store.js').SavedReplayRecord} replay */
 function formatReplayDuration(replay) {
+  // Live rows show the in-game clock remaining; finished tracked rows use elapsed time.
+  if (
+    isTrackedReplay(replay) &&
+    replay.trackedStatus === "live" &&
+    typeof replay.timeSeconds === "number"
+  ) {
+    const clock = formatDuration(Math.max(0, replay.timeSeconds));
+    return replay.wentToOvertime ? `${clock} OT` : clock;
+  }
+
   const total = formatDuration(replay.secondsPlayed);
   const otSeconds = replay.overtimeSecondsPlayed ?? 0;
 
@@ -279,6 +299,35 @@ function formatReplayDuration(replay) {
   return total;
 }
 
+/** @param {SavedReplayRecord} replay */
+function isTrackedReplay(replay) {
+  return replay?.trackedStatus === "live" || replay?.trackedStatus === "awaiting_sync";
+}
+
+function getTrackedReplayViews() {
+  const libraryGuids = new Set(
+    (replayLibrary?.replays ?? [])
+      .map((replay) => replay.matchGuid?.toUpperCase())
+      .filter(Boolean),
+  );
+  // Also hide when a synced replay exists elsewhere in state (other pages).
+  for (const replay of state?.savedReplays ?? []) {
+    if (replay.filePath?.trim() || replay.cloudOnly || replay.ballchasingId) {
+      libraryGuids.add(replay.matchGuid.toUpperCase());
+    }
+  }
+
+  return trackedMatches
+    .filter((match) => !libraryGuids.has(match.matchGuid.toUpperCase()))
+    .map((match) => {
+      const view = trackedMatchToReplayView(match);
+      return {
+        ...view,
+        timeSeconds: match.timeSeconds,
+      };
+    });
+}
+
 /** @typedef {import('../../dist/store.js').SavedReplayPlayer} SavedReplayPlayer */
 
 import { getMapDisplayName } from "../../dist/maps.js";
@@ -290,6 +339,9 @@ import {
   buildReplayExportFileName,
   getSteamCommunityProfileUrl,
   parseReplayPlayerPlatform,
+  isOvertimeDeveloperPlayerId,
+  isPsyonixBotPlayerId,
+  OVERTIME_DEV_YOUTUBE_URL,
   playerMatchesAccount,
   playerMatchesLinkedAccount,
   replayMatchesSearchQuery,
@@ -305,9 +357,13 @@ import {
   isProPlayer,
 } from "../../dist/proPlayers.js";
 import { getRankIconUrl, getRankTitle } from "../../dist/ranks.js";
+import { trackedMatchToReplayView } from "../../dist/trackedMatch.js";
 
 /** @type {Set<string>} */
 const expandedReplays = new Set();
+
+/** @type {import('../../dist/trackedMatch.js').TrackedMatch[]} */
+let trackedMatches = [];
 
 /** @type {Map<string, string>} */
 const platformPlayerIds = new Map();
@@ -756,6 +812,10 @@ function resultClass(result) {
 
 /** @param {SavedReplayRecord} replay */
 function getReplayOutcome(replay) {
+  if (isTrackedReplay(replay) && replay.trackedStatus === "live") {
+    return "neutral";
+  }
+
   if (!replayIncludesLinkedAccount(replay)) {
     return "neutral";
   }
@@ -871,6 +931,23 @@ function renderProPlayerTooltip(profile) {
   `;
 }
 
+function renderDevPlayerTooltip() {
+  const flagUrl = getCountryFlagImageUrl("Netherlands");
+  const flagHtml = flagUrl
+    ? `<img class="pro-player-tooltip-flag" src="${escapeHtml(flagUrl)}" width="22" height="16" alt="" title="Netherlands" loading="lazy" decoding="async" />`
+    : "";
+
+  return `
+    <div class="pro-player-tooltip dev-player-tooltip">
+      <img class="pro-player-tooltip-image" src="amalox-car.png" alt="" loading="lazy" decoding="async" />
+      <div class="pro-player-tooltip-body">
+        <div class="pro-player-tooltip-name">${flagHtml}<span>Amalox</span></div>
+        <div class="dev-player-tooltip-desc">This is Amalox, the developer of Overtime! He loves you for using this app :)</div>
+      </div>
+    </div>
+  `;
+}
+
 function hideProPlayerTooltip() {
   const portal = elements.proPlayerTooltipPortal;
   portal.classList.add("hidden");
@@ -878,10 +955,10 @@ function hideProPlayerTooltip() {
   portal.innerHTML = "";
 }
 
-/** @param {HTMLElement} anchor @param {import('../../dist/proPlayers.js').ProPlayerProfile} profile */
-function showProPlayerTooltip(anchor, profile) {
+/** @param {HTMLElement} anchor @param {string} html */
+function showPlayerTagTooltip(anchor, html) {
   const portal = elements.proPlayerTooltipPortal;
-  portal.innerHTML = renderProPlayerTooltip(profile);
+  portal.innerHTML = html;
   portal.classList.remove("hidden");
   portal.setAttribute("aria-hidden", "false");
 
@@ -902,6 +979,16 @@ function showProPlayerTooltip(anchor, profile) {
   portal.style.top = `${top}px`;
 }
 
+/** @param {HTMLElement} anchor @param {import('../../dist/proPlayers.js').ProPlayerProfile} profile */
+function showProPlayerTooltip(anchor, profile) {
+  showPlayerTagTooltip(anchor, renderProPlayerTooltip(profile));
+}
+
+/** @param {HTMLElement} anchor */
+function showDevPlayerTooltip(anchor) {
+  showPlayerTagTooltip(anchor, renderDevPlayerTooltip());
+}
+
 /** @param {SavedReplayPlayer} player */
 function renderPlayerRankIcon(player) {
   if (player.rankTier == null || player.rankTier <= 0) {
@@ -919,17 +1006,27 @@ function renderPlayerRankIcon(player) {
 
 /** @param {SavedReplayPlayer} player @param {SavedReplayRecord} replay */
 function renderPlayerStatsTable(players, replay) {
-  const rows = players
+  const rows = [...players]
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .map((player) => {
       const isLocal =
         playerMatchesAccount(player.playerId, replay.accountId) ||
         accounts.some((account) => playerMatchesLinkedAccount(player, account));
-      const trackerUrl = getTrackerProfileUrl(player.playerId, player.playerName);
+      const isBot = isPsyonixBotPlayerId(player.playerId);
+      const trackerUrl = isBot
+        ? ""
+        : getTrackerProfileUrl(player.playerId, player.playerName);
       const proProfile = getProPlayerProfile(player.playerId, player.playerName);
       const tooltipProfile = getProPlayerTooltipProfile(player.playerId, player.playerName);
       const showPro = Boolean(proProfile || player.isPro);
+      const showDev = isOvertimeDeveloperPlayerId(player.playerId);
       const badges = [];
 
+      if (showDev) {
+        badges.push(
+          `<button class="replay-dev-tag has-tooltip" type="button" data-action="open-url" data-url="${escapeHtml(OVERTIME_DEV_YOUTUBE_URL)}" title="Amalox on YouTube">DEV</button>`,
+        );
+      }
       if (showPro) {
         const liquipediaUrl = getProPlayerLiquipediaUrl(player.playerId, player.playerName);
         badges.push(
@@ -940,19 +1037,23 @@ function renderPlayerStatsTable(players, replay) {
         badges.push('<span class="replay-mvp">MVP</span>');
       }
 
-      return `
-        <tr class="${isLocal ? "is-local" : ""}">
-          <td class="replay-stats-player">
-            <div class="replay-stats-player-inner">
-              ${renderPlayerRankIcon(player)}
-              ${renderPlayerPlatformIcon(player.playerId)}
-              <button
+      const playerNameMarkup = trackerUrl
+        ? `<button
                 class="replay-player-link"
                 type="button"
                 data-action="open-url"
                 data-url="${escapeHtml(trackerUrl)}"
                 title="View on RL Tracker"
-              >${TRN_LOGO_HTML}<span class="replay-player-link-name">${escapeHtml(player.playerName)}</span></button>${badges.length ? `<span class="replay-stats-player-badges">${badges.join("")}</span>` : ""}
+              >${TRN_LOGO_HTML}<span class="replay-player-link-name">${escapeHtml(player.playerName)}</span></button>`
+        : `<span class="replay-player-link-name"${isBot ? ' title="Psyonix bot"' : ""}>${escapeHtml(player.playerName)}</span>`;
+
+      return `
+        <tr class="${isLocal ? "is-local" : ""}">
+          <td class="replay-stats-player">
+            <div class="replay-stats-player-inner">
+              ${renderPlayerRankIcon(player)}
+              ${isBot ? "" : renderPlayerPlatformIcon(player.playerId)}
+              ${playerNameMarkup}${badges.length ? `<span class="replay-stats-player-badges">${badges.join("")}</span>` : ""}
             </div>
           </td>
           <td class="replay-stats-score">${player.score}</td>
@@ -1008,12 +1109,20 @@ function renderBallchasingStatus(replay) {
 
 /** @param {SavedReplayRecord} replay */
 function renderReplayDetails(replay) {
-  const ballchasingStatus = renderBallchasingStatus(replay);
+  const ballchasingStatus = isTrackedReplay(replay)
+    ? `<p class="hint replay-tracked-hint">${
+        replay.trackedStatus === "live"
+          ? "Live match from the Stats API. Player stats update as the game goes on. Sync later to save the real replay file."
+          : "Match finished and is waiting for sync. Stats shown here are from the Stats API until the replay file is downloaded."
+      }</p>`
+    : renderBallchasingStatus(replay);
 
   if (!replay.players?.length) {
-    const hint = isImportedReplay(replay)
-      ? "Could not read player stats from this replay file."
-      : "Detailed player stats are available for newly synced replays.";
+    const hint = isTrackedReplay(replay)
+      ? "Waiting for live player stats from Rocket League…"
+      : isImportedReplay(replay)
+        ? "Could not read player stats from this replay file."
+        : "Detailed player stats are available for newly synced replays.";
     return `
       <div class="replay-details-panel">
         ${ballchasingStatus}
@@ -1161,6 +1270,10 @@ async function copyReplayFile(replay) {
 
 /** @param {SavedReplayRecord} replay */
 function renderReplayShareButton(replay) {
+  if (isTrackedReplay(replay)) {
+    return "";
+  }
+
   const isOpen = openShareMenuGuid === replay.matchGuid;
 
   return `
@@ -1308,6 +1421,10 @@ function setShareMenuOpen(matchGuid) {
 
 /** @param {SavedReplayRecord} replay */
 function renderReplayMenuButton(replay) {
+  if (isTrackedReplay(replay)) {
+    return "";
+  }
+
   const isOpen = openReplayMenuGuid === replay.matchGuid;
 
   return `
@@ -1496,7 +1613,8 @@ function setReplayMenuOpen(matchGuid) {
 function findReplayByGuid(matchGuid) {
   return (
     visibleReplays.find((item) => item.matchGuid === matchGuid) ??
-    replayLibrary?.replays.find((item) => item.matchGuid === matchGuid)
+    replayLibrary?.replays.find((item) => item.matchGuid === matchGuid) ??
+    getTrackedReplayViews().find((item) => item.matchGuid === matchGuid)
   );
 }
 
@@ -1533,7 +1651,11 @@ function filterPageReplays(replays) {
   return replays.filter((replay) => replayMatchesLocalSearch(replay, query));
 }
 
-function updateReplaySelectionUi(visibleGuids = visibleReplays.map((replay) => replay.matchGuid)) {
+function updateReplaySelectionUi(
+  visibleGuids = visibleReplays
+    .filter((replay) => !isTrackedReplay(replay))
+    .map((replay) => replay.matchGuid),
+) {
   const visibleSelected = visibleGuids.filter((guid) => selectedReplayGuids.has(guid));
 
   elements.replaySelectionBar.classList.toggle("hidden", !replaySelectionMode);
@@ -1605,12 +1727,19 @@ function openDeleteReplayDialog(replays) {
 }
 
 function renderReplaysFromLibrary() {
+  const showTracked = !elements.syncedOnly?.checked;
+  const trackedViews = showTracked
+    ? filterPageReplays(getTrackedReplayViews())
+    : [];
+
   if (!replayLibrary) {
-    renderReplays([]);
+    renderReplays(trackedViews);
     return;
   }
 
-  renderReplays(filterPageReplays(replayLibrary.replays));
+  const pageReplays = filterPageReplays(replayLibrary.replays);
+  const pageTracked = replayLibrary.page <= 1 ? trackedViews : [];
+  renderReplays([...pageTracked, ...pageReplays]);
 }
 
 /** @param {SavedReplayRecord} replay */
@@ -1824,6 +1953,13 @@ function renderGamemodeReplayIcon(playlistId) {
 
 /** @param {SavedReplayRecord} replay */
 function replayIncludesLinkedAccount(replay) {
+  if (isTrackedReplay(replay)) {
+    if (replay.localPlayerTeam !== undefined && replay.localPlayerTeam !== null) {
+      return true;
+    }
+    return findReplayPlayer(replay) !== null;
+  }
+
   if (isImportedReplay(replay)) {
     if (replay.hasAccountMatch === false) {
       return false;
@@ -1869,6 +2005,10 @@ function isBallchasingQuotaError(replay) {
 
 /** @param {SavedReplayRecord} replay */
 function renderBallchasingControls(replay) {
+  if (isTrackedReplay(replay)) {
+    return "";
+  }
+
   const merged = withBallchasingOverrides(replay);
   const uploading = ballchasingUploading.has(replay.matchGuid);
   const uploaded = isBallchasingUploaded(merged);
@@ -2038,19 +2178,22 @@ function renderReplays(replays) {
   refreshPlatformPlayerIds(replays);
 
   const query = elements.replaySearch.value.trim();
-  const total = replayLibrary?.total ?? replays.length;
-  const pageCount = replayLibrary?.replays.length ?? replays.length;
+  const trackedCount = replays.filter((replay) => isTrackedReplay(replay)).length;
+  const libraryTotal = replayLibrary?.total ?? 0;
+  const total = libraryTotal + (replayLibrary?.page === 1 || !replayLibrary ? trackedCount : 0);
+  const pageCount = replayLibrary?.replays.length ?? 0;
+  const visibleLibraryCount = replays.length - trackedCount;
 
   if (query && replayLibrary) {
     elements.replayCount.textContent =
-      replays.length === pageCount
+      visibleLibraryCount === pageCount
         ? `${replays.length} on this page`
-        : `${replays.length} of ${pageCount} on this page`;
+        : `${replays.length} of ${pageCount + trackedCount} on this page`;
   } else {
     elements.replayCount.textContent = `${total} replay${total === 1 ? "" : "s"}`;
   }
 
-  const hasAnyReplays = (replayLibrary?.total ?? replays.length) > 0;
+  const hasAnyReplays = libraryTotal > 0 || trackedCount > 0 || replays.length > 0;
   elements.replayEmpty.classList.toggle("hidden", hasAnyReplays);
   elements.replayList.innerHTML = "";
 
@@ -2077,9 +2220,13 @@ function renderReplays(replays) {
     const imported = isImportedReplay(replay);
     const isSelected = selectedReplayGuids.has(replay.matchGuid);
     const card = document.createElement("article");
-    card.className = `replay-card replay-card--${outcome} replay-card--${stripe}${imported ? " replay-card--imported" : ""}${isExpanded ? " expanded" : ""}${isSelected ? " is-selected" : ""}`;
+    const tracked = isTrackedReplay(replay);
+    card.className = `replay-card replay-card--${outcome} replay-card--${stripe}${imported ? " replay-card--imported" : ""}${tracked ? " replay-card--tracked" : ""}${replay.trackedStatus === "live" ? " replay-card--live" : ""}${isExpanded ? " expanded" : ""}${isSelected ? " is-selected" : ""}`;
     card.dataset.matchGuid = replay.matchGuid;
     card.dataset.outcome = outcome;
+    if (tracked) {
+      card.dataset.tracked = replay.trackedStatus;
+    }
 
     const accountLabel = shouldShowAccountLabel(replay)
       ? `<span class="replay-account">${escapeHtml(replay.accountDisplayName)}</span>`
@@ -2093,16 +2240,30 @@ function renderReplays(replays) {
       ? `<span class="badge cloud" title="Stored on Ballchasing only">Cloud</span>`
       : "";
 
-    const includesAccount = replayIncludesLinkedAccount(replay);
-    const gamemodeLabel = getPlaylistDisplayName(replay.playlist);
+    const liveBadge =
+      replay.trackedStatus === "live"
+        ? `<span class="badge live" title="This match is being played right now">LIVE</span>`
+        : "";
 
-    const resultLabel = !includesAccount
-      ? renderGamemodeReplayIcon(replay.playlist)
-      : outcome === "win"
-        ? "W"
-        : outcome === "loss"
-          ? "L"
-          : replay.result.charAt(0).toUpperCase();
+    const awaitingBadge =
+      replay.trackedStatus === "awaiting_sync"
+        ? `<span class="badge awaiting-sync" title="Finished match waiting for a synced replay file">Awaiting sync</span>`
+        : "";
+
+    const includesAccount = replayIncludesLinkedAccount(replay);
+    const gamemodeLabel = tracked
+      ? replay.playlistName || (replay.trackedStatus === "live" ? "Live match" : "Awaiting sync")
+      : getPlaylistDisplayName(replay.playlist);
+
+    const resultLabel = tracked && replay.trackedStatus === "live"
+      ? "●"
+      : !includesAccount
+        ? renderGamemodeReplayIcon(replay.playlist)
+        : outcome === "win"
+          ? "W"
+          : outcome === "loss"
+            ? "L"
+            : replay.result.charAt(0).toUpperCase();
 
     const noAccountTitle = `Spectator replay · ${gamemodeLabel}`;
     const noAccountAria = `Spectator replay, ${gamemodeLabel}`;
@@ -2112,8 +2273,9 @@ function renderReplays(replays) {
       ? `<span class="replay-name">${escapeHtml(replayName)}</span>`
       : "";
 
-    const selectMarkup = replaySelectionMode
-      ? `<label class="replay-select checkbox" title="Select replay">
+    const selectMarkup =
+      replaySelectionMode && !tracked
+        ? `<label class="replay-select checkbox" title="Select replay">
           <input
             class="replay-select-input"
             type="checkbox"
@@ -2121,28 +2283,33 @@ function renderReplays(replays) {
             ${isSelected ? "checked" : ""}
           />
         </label>`
-      : "";
+        : "";
 
     const sortBy = config?.replaySortBy ?? "match";
     const displayTimestamp = getReplayDisplayTimestamp(replay, sortBy);
     const displayTimestampTitle = getReplayDisplayTimestampTitle(replay, sortBy);
+    const timeLabel = tracked && replay.trackedStatus === "live"
+      ? "Live now"
+      : formatRelativeDate(displayTimestamp);
 
     card.innerHTML = `
       <div class="replay-row replay-row--${outcome}">
         ${selectMarkup}
-        <div class="replay-result replay-result--${outcome}${includesAccount ? "" : " replay-result--no-account"}"${includesAccount ? "" : ` title="${escapeHtml(noAccountTitle)}"`} aria-label="${includesAccount ? (outcome === "win" ? "Win" : outcome === "loss" ? "Loss" : "Unknown result") : escapeHtml(noAccountAria)}">${resultLabel}</div>
+        <div class="replay-result replay-result--${outcome}${includesAccount || (tracked && replay.trackedStatus === "live") ? "" : " replay-result--no-account"}${tracked && replay.trackedStatus === "live" ? " replay-result--live" : ""}"${includesAccount || tracked ? "" : ` title="${escapeHtml(noAccountTitle)}"`} aria-label="${tracked && replay.trackedStatus === "live" ? "Live match" : includesAccount ? (outcome === "win" ? "Win" : outcome === "loss" ? "Loss" : "Unknown result") : escapeHtml(noAccountAria)}">${resultLabel}</div>
         <div class="replay-body">
           <div class="replay-primary">
-            <h3>${escapeHtml(getPlaylistDisplayName(replay.playlist))}</h3>
+            <h3>${escapeHtml(gamemodeLabel)}</h3>
             <span class="replay-score">${replay.team0Score} – ${replay.team1Score}</span>
             ${replayNameLabel}
           </div>
           <div class="replay-secondary">
-            <span${displayTimestampTitle ? ` title="${escapeHtml(displayTimestampTitle)}"` : ""}>${formatRelativeDate(displayTimestamp)}</span>
+            <span${displayTimestampTitle && !tracked ? ` title="${escapeHtml(displayTimestampTitle)}"` : ""}>${timeLabel}</span>
             <span class="replay-dot">·</span>
             <span>${escapeHtml(formatArenaName(replay))}</span>
             <span class="replay-dot">·</span>
             <span>${formatReplayDuration(replay)}</span>
+            ${liveBadge ? `<span class="replay-dot">·</span>${liveBadge}` : ""}
+            ${awaitingBadge ? `<span class="replay-dot">·</span>${awaitingBadge}` : ""}
             ${importedBadge ? `<span class="replay-dot">·</span>${importedBadge}` : ""}
             ${cloudBadge ? `<span class="replay-dot">·</span>${cloudBadge}` : ""}
             ${accountLabel}
@@ -2439,6 +2606,9 @@ function fillSettingsForm(nextConfig) {
   if (elements.autoUpdate instanceof HTMLInputElement) {
     elements.autoUpdate.checked = nextConfig.autoUpdateEnabled !== false;
   }
+  if (elements.liveMatchTracking instanceof HTMLInputElement) {
+    elements.liveMatchTracking.checked = nextConfig.liveMatchTrackingEnabled !== false;
+  }
   elements.replayDir.value = nextConfig.replayDir;
   elements.autoUploadBallchasing.checked = nextConfig.autoUploadBallchasing;
   if (elements.deleteLocalAfterUpload) {
@@ -2499,32 +2669,62 @@ function renderUpdateStatus(status) {
   }
 }
 
-function updateSyncSettingsVisibility() {
-  const syncMode =
-    elements.syncModeManual instanceof HTMLInputElement && elements.syncModeManual.checked
-      ? "manual"
-      : elements.syncModeInterval instanceof HTMLInputElement && elements.syncModeInterval.checked
-        ? "interval"
-        : "process";
+function readSettingsSyncMode() {
+  if (elements.syncModeManual instanceof HTMLInputElement && elements.syncModeManual.checked) {
+    return "manual";
+  }
+  if (elements.syncModeInterval instanceof HTMLInputElement && elements.syncModeInterval.checked) {
+    return "interval";
+  }
+  return "process";
+}
 
-  elements.syncProcessSettings?.classList.toggle("hidden", syncMode !== "process");
-  elements.syncIntervalSettings?.classList.toggle("hidden", syncMode !== "interval");
-
-  const afterGamesSelected =
-    syncMode === "process" &&
+function isAfterGamesSelectedInSettings() {
+  return (
+    readSettingsSyncMode() === "process" &&
     elements.processSyncAfterGames instanceof HTMLInputElement &&
-    elements.processSyncAfterGames.checked;
+    elements.processSyncAfterGames.checked
+  );
+}
 
-  if (elements.syncAfterGames instanceof HTMLInputElement) {
-    elements.syncAfterGames.disabled = !afterGamesSelected;
+/** Place the shared Stats API panel under after-games, or under live tracking otherwise. */
+function updateStatsApiPanelPlacement() {
+  const panel = elements.statsApiCheckRow;
+  if (!(panel instanceof HTMLElement)) {
+    return;
   }
 
-  if (!afterGamesSelected) {
+  const afterGames = isAfterGamesSelectedInSettings();
+  const host = afterGames
+    ? elements.statsApiHostAfterGames
+    : elements.statsApiHostLiveTracking;
+
+  if (host instanceof HTMLElement && panel.parentElement !== host) {
+    host.appendChild(panel);
+  }
+
+  panel.classList.toggle("hidden", !host);
+  if (!host) {
     renderStatsApiStatus(null);
     return;
   }
 
   void refreshStatsApiStatus();
+}
+
+function updateSyncSettingsVisibility() {
+  const syncMode = readSettingsSyncMode();
+
+  elements.syncProcessSettings?.classList.toggle("hidden", syncMode !== "process");
+  elements.syncIntervalSettings?.classList.toggle("hidden", syncMode !== "interval");
+
+  const afterGamesSelected = isAfterGamesSelectedInSettings();
+
+  if (elements.syncAfterGames instanceof HTMLInputElement) {
+    elements.syncAfterGames.disabled = !afterGamesSelected;
+  }
+
+  updateStatsApiPanelPlacement();
 }
 
 let statsApiCheckVersion = 0;
@@ -2533,7 +2733,7 @@ let statsApiCheckVersion = 0;
 let lastStatsApiCheckResult = null;
 
 const STATS_API_FIX_TOOLTIP_READY =
-  "Enables Rocket League to broadcast match events on your PC so Overtime can count finished online games. Restart Rocket League after applying.";
+  "Enables Rocket League to broadcast match events on your PC so Overtime can track live matches and count finished online games. Restart Rocket League after applying.";
 const STATS_API_FIX_TOOLTIP_GAME_RUNNING =
   "Close Rocket League before applying this fix. Rocket League reads its Stats API settings on startup, so the change only takes effect after a restart anyway.";
 
@@ -2709,6 +2909,10 @@ function readSettingsForm() {
       elements.autoUpdate instanceof HTMLInputElement
         ? elements.autoUpdate.checked
         : true,
+    liveMatchTrackingEnabled:
+      elements.liveMatchTracking instanceof HTMLInputElement
+        ? elements.liveMatchTracking.checked
+        : true,
     autoUploadBallchasing: elements.autoUploadBallchasing.checked,
     deleteLocalAfterBallchasingUpload: elements.deleteLocalAfterUpload?.checked ?? false,
     ballchasingToken: elements.ballchasingToken.value.trim(),
@@ -2781,6 +2985,7 @@ async function bootstrap() {
     accounts = await api.getAccounts();
     fillSettingsForm(config);
     renderGameMonitor(await api.getGameMonitorState());
+    trackedMatches = await api.getTrackedMatches();
     void api.getUpdateStatus().then(renderUpdateStatus);
     void loadReplayLibrary({ page: 1 });
     void refreshBallchasingViewerAvailability();
@@ -2884,13 +3089,6 @@ function updateOnboardingGameMonitorFastPoll() {
 
     void api.getGameMonitorState().then(renderGameMonitor);
   }, ONBOARDING_GAME_MONITOR_FAST_POLL_MS);
-}
-
-function isOnboardingAfterGamesSelected() {
-  return (
-    elements.onboardingProcessAfterGames instanceof HTMLInputElement &&
-    elements.onboardingProcessAfterGames.checked
-  );
 }
 
 function isOnboardingProcessContinueBlocked() {
@@ -3066,22 +3264,13 @@ function updateOnboardingProgress(step) {
 }
 
 function updateOnboardingProcessVisibility() {
-  const afterGamesSelected =
-    elements.onboardingProcessAfterGames instanceof HTMLInputElement &&
-    elements.onboardingProcessAfterGames.checked;
-
-  elements.onboardingStatsApiRow?.classList.toggle("hidden", !afterGamesSelected);
+  const afterGamesSelected = isOnboardingAfterGamesSelected();
 
   if (elements.onboardingSyncAfterGames instanceof HTMLInputElement) {
     elements.onboardingSyncAfterGames.disabled = !afterGamesSelected;
   }
 
-  if (afterGamesSelected) {
-    void refreshOnboardingStatsApiStatus();
-  } else {
-    renderOnboardingStatsApiStatus(null);
-  }
-
+  updateOnboardingStatsApiPlacement("process");
   updateOnboardingProcessContinueButton();
 }
 
@@ -3233,8 +3422,12 @@ function showOnboardingStep(step) {
     updateOnboardingBallchasingContinueButton();
   }
 
-  if (step === "preferences" && lastOnboardingStatsApiResult?.canAutoFix) {
-    applyOnboardingStatsApiFixUi(lastOnboardingStatsApiResult);
+  if (step === "preferences") {
+    updateOnboardingLiveMatchTrackingVisibility();
+    updateOnboardingStatsApiPlacement("preferences");
+    if (lastOnboardingStatsApiResult?.canAutoFix) {
+      applyOnboardingStatsApiFixUi(lastOnboardingStatsApiResult);
+    }
   }
 }
 
@@ -3257,6 +3450,9 @@ function readOnboardingConfig() {
     autoUpdateEnabled: elements.onboardingAutoUpdate
       ? Boolean(elements.onboardingAutoUpdate.checked)
       : true,
+    liveMatchTrackingEnabled: elements.onboardingLiveMatchTracking
+      ? Boolean(elements.onboardingLiveMatchTracking.checked)
+      : true,
   };
 
   if (onboardingAccountSkipped) {
@@ -3272,6 +3468,58 @@ function readOnboardingConfig() {
   }
 
   return partial;
+}
+
+function isOnboardingAfterGamesSelected() {
+  return (
+    !onboardingAccountSkipped &&
+    readOnboardingSyncMode() === "process" &&
+    elements.onboardingProcessAfterGames instanceof HTMLInputElement &&
+    elements.onboardingProcessAfterGames.checked
+  );
+}
+
+/** Place onboarding Stats API under process (after-games) or under live tracking. */
+function updateOnboardingStatsApiPlacement(step) {
+  const panel = elements.onboardingStatsApiRow;
+  if (!(panel instanceof HTMLElement)) {
+    return;
+  }
+
+  const afterGames = isOnboardingAfterGamesSelected();
+  const onProcessStep = step === "process";
+  const onPreferencesStep = step === "preferences";
+
+  let host = null;
+  if (afterGames && onProcessStep) {
+    host = elements.onboardingStatsApiHostProcess;
+  } else if (!afterGames && onPreferencesStep) {
+    host = elements.onboardingStatsApiHostLiveTracking;
+  }
+
+  if (host instanceof HTMLElement && panel.parentElement !== host) {
+    host.appendChild(panel);
+  }
+
+  const show = Boolean(host);
+  panel.classList.toggle("hidden", !show);
+
+  if (!show) {
+    renderOnboardingStatsApiStatus(null);
+    return;
+  }
+
+  void refreshOnboardingStatsApiStatus();
+}
+
+function updateOnboardingLiveMatchTrackingVisibility() {
+  elements.onboardingLiveMatchTrackingRow?.classList.remove("hidden");
+  if (
+    elements.onboardingLiveMatchTracking instanceof HTMLInputElement &&
+    !elements.onboardingLiveMatchTracking.dataset.userTouched
+  ) {
+    elements.onboardingLiveMatchTracking.checked = true;
+  }
 }
 
 async function finishOnboarding() {
@@ -3695,6 +3943,12 @@ elements.replayList.addEventListener("mouseover", (event) => {
     return;
   }
 
+  const devTag = target.closest(".replay-dev-tag");
+  if (devTag instanceof HTMLElement) {
+    showDevPlayerTooltip(devTag);
+    return;
+  }
+
   const proTag = target.closest(".replay-pro-tag");
   if (!(proTag instanceof HTMLElement)) {
     return;
@@ -3716,15 +3970,16 @@ elements.replayList.addEventListener("mouseout", (event) => {
     return;
   }
 
-  const proTag = target.closest(".replay-pro-tag");
-  if (!(proTag instanceof HTMLElement)) {
+  const tag =
+    target.closest(".replay-dev-tag") ?? target.closest(".replay-pro-tag");
+  if (!(tag instanceof HTMLElement)) {
     return;
   }
 
   const related = event.relatedTarget;
   if (
     related instanceof Node &&
-    (proTag.contains(related) || elements.proPlayerTooltipPortal.contains(related))
+    (tag.contains(related) || elements.proPlayerTooltipPortal.contains(related))
   ) {
     return;
   }
@@ -3842,6 +4097,17 @@ elements.syncModeInterval?.addEventListener("change", () => {
 elements.syncModeManual?.addEventListener("change", () => {
   updateSyncSettingsVisibility();
   scheduleSaveSettings();
+});
+elements.liveMatchTracking?.addEventListener("change", () => {
+  if (elements.liveMatchTracking instanceof HTMLInputElement) {
+    elements.liveMatchTracking.dataset.userTouched = "1";
+  }
+  updateStatsApiPanelPlacement();
+});
+elements.onboardingLiveMatchTracking?.addEventListener("change", () => {
+  if (elements.onboardingLiveMatchTracking instanceof HTMLInputElement) {
+    elements.onboardingLiveMatchTracking.dataset.userTouched = "1";
+  }
 });
 elements.processSyncOnCloseOnly?.addEventListener("change", () => {
   updateSyncSettingsVisibility();
@@ -4279,6 +4545,28 @@ api.onUpdateStatus((status) => {
 
 api.onGameMonitorUpdated((monitor) => {
   renderGameMonitor(monitor);
+});
+
+api.onTrackedMatchesUpdated((matches) => {
+  const previousLiveGuid = trackedMatches
+    .find((match) => match.status === "live")
+    ?.matchGuid?.toUpperCase();
+  trackedMatches = matches ?? [];
+  const nextLiveGuid = trackedMatches
+    .find((match) => match.status === "live")
+    ?.matchGuid?.toUpperCase();
+
+  // New live match: expand it and collapse any awaiting-sync rows.
+  if (nextLiveGuid && nextLiveGuid !== previousLiveGuid) {
+    for (const match of trackedMatches) {
+      if (match.status === "awaiting_sync") {
+        expandedReplays.delete(match.matchGuid);
+      }
+    }
+    expandedReplays.add(nextLiveGuid);
+  }
+
+  renderReplaysFromLibrary();
 });
 
 function formatEpicDeviceCode(code) {

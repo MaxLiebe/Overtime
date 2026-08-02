@@ -1,4 +1,9 @@
 import net from "node:net";
+import type {
+  MatchCreatedData,
+  MatchDestroyedData,
+  StatsApiUpdateState,
+} from "./trackedMatch.js";
 
 export const DEFAULT_STATS_API_HOST = "127.0.0.1";
 export const DEFAULT_STATS_API_PORT = 49123;
@@ -8,9 +13,15 @@ export interface MatchEndedData {
   WinnerTeamNum?: number;
 }
 
+export type StatsApiData =
+  | MatchEndedData
+  | MatchCreatedData
+  | MatchDestroyedData
+  | StatsApiUpdateState;
+
 export interface StatsApiEnvelope {
   Event?: string;
-  Data?: string | MatchEndedData;
+  Data?: string | StatsApiData;
 }
 
 /** Split concatenated JSON objects from the Stats API TCP stream. */
@@ -61,9 +72,9 @@ export function extractJsonFrames(buffer: string): { frames: string[]; remainder
   return { frames, remainder };
 }
 
-export function parseStatsApiData(data: StatsApiEnvelope["Data"]): MatchEndedData {
+export function parseStatsApiData(data: StatsApiEnvelope["Data"]): StatsApiData {
   if (typeof data === "string") {
-    return JSON.parse(data) as MatchEndedData;
+    return JSON.parse(data) as StatsApiData;
   }
 
   return data ?? {};
@@ -73,7 +84,10 @@ export interface RocketLeagueStatsClientOptions {
   host?: string;
   port?: number;
   reconnectDelayMs?: number;
-  onMatchEnded?: (matchGuid: string) => void;
+  onMatchCreated?: (matchGuid: string) => void;
+  onUpdateState?: (data: StatsApiUpdateState) => void;
+  onMatchEnded?: (matchGuid: string, winnerTeamNum?: number) => void;
+  onMatchDestroyed?: (matchGuid: string) => void;
   onConnected?: () => void;
   onDisconnected?: () => void;
 }
@@ -186,17 +200,41 @@ export class RocketLeagueStatsClient {
   private handleFrame(frame: string): void {
     try {
       const envelope = JSON.parse(frame) as StatsApiEnvelope;
-      if (envelope.Event !== "MatchEnded") {
+      const event = envelope.Event?.trim();
+      if (!event) {
         return;
       }
 
       const data = parseStatsApiData(envelope.Data);
-      const matchGuid = data.MatchGuid?.trim();
-      if (!matchGuid) {
+
+      if (event === "MatchCreated" || event === "MatchInitialized") {
+        const matchGuid = (data as MatchCreatedData).MatchGuid?.trim();
+        if (matchGuid) {
+          this.options.onMatchCreated?.(matchGuid);
+        }
         return;
       }
 
-      this.options.onMatchEnded?.(matchGuid);
+      if (event === "UpdateState") {
+        this.options.onUpdateState?.(data as StatsApiUpdateState);
+        return;
+      }
+
+      if (event === "MatchEnded") {
+        const ended = data as MatchEndedData;
+        const matchGuid = ended.MatchGuid?.trim();
+        if (matchGuid) {
+          this.options.onMatchEnded?.(matchGuid, ended.WinnerTeamNum);
+        }
+        return;
+      }
+
+      if (event === "MatchDestroyed") {
+        const matchGuid = (data as MatchDestroyedData).MatchGuid?.trim();
+        if (matchGuid) {
+          this.options.onMatchDestroyed?.(matchGuid);
+        }
+      }
     } catch {
       // Ignore malformed frames while the socket is mid-stream.
     }

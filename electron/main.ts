@@ -69,6 +69,7 @@ import {
   createInactiveGameMonitorState,
   checkStatsApiStatus,
   fixStatsApiConfig,
+  type TrackedMatch,
   playReplayInGame,
   resolveProPlayerProfile,
   sanitizeReplayFileName,
@@ -477,6 +478,35 @@ function broadcastGameMonitor(state: GameMonitorState): void {
   mainWindow?.webContents.send("game-monitor-updated", state);
 }
 
+function broadcastTrackedMatches(matches: TrackedMatch[]): void {
+  mainWindow?.webContents.send("tracked-matches-updated", matches);
+}
+
+function getLinkedPlayerIdsForTracking(): string[] {
+  const ids: string[] = [];
+  for (const account of accounts) {
+    if (account.platformPlayerId?.trim()) {
+      ids.push(account.platformPlayerId.trim());
+    }
+    if (account.accountId?.trim()) {
+      ids.push(account.accountId.trim());
+    }
+  }
+  return ids;
+}
+
+async function pruneTrackedMatchesAgainstState(): Promise<void> {
+  if (!gameWatcher) {
+    return;
+  }
+
+  const state = await loadAppState(paths.statePath);
+  const guids = state.savedReplays
+    .filter((replay) => replay.filePath?.trim() || replay.cloudOnly || replay.ballchasingId)
+    .map((replay) => replay.matchGuid);
+  gameWatcher.pruneSyncedMatchGuids(guids);
+}
+
 function getGameMonitorState(): GameMonitorState {
   if (gameWatcher) {
     return gameWatcher.getState();
@@ -489,24 +519,33 @@ function startGameWatcher(): void {
   gameWatcher?.stop();
   gameWatcher = null;
 
-  const inactiveState = createInactiveGameMonitorState(config);
-  if (!usesProcessSync(config)) {
-    broadcastGameMonitor(inactiveState);
-    return;
-  }
-
   gameWatcher = new RocketLeagueWatcher({
     getConfig: () => config,
-    onStateChange: broadcastGameMonitor,
+    getLinkedPlayerIds: getLinkedPlayerIdsForTracking,
+    onStateChange: (state) => {
+      if (usesProcessSync(config)) {
+        broadcastGameMonitor(state);
+      } else {
+        broadcastGameMonitor(createInactiveGameMonitorState(config));
+      }
+    },
+    onTrackedMatchesChange: broadcastTrackedMatches,
     onGameClosed: () => {
-      void runSync();
+      if (usesProcessSync(config)) {
+        void runSync();
+      }
     },
     onGamesThresholdReached: () => {
       void runSync({ allowWhileGameRunning: true });
     },
   });
   gameWatcher.start();
-  broadcastGameMonitor(gameWatcher.getState());
+  broadcastGameMonitor(
+    usesProcessSync(config)
+      ? gameWatcher.getState()
+      : createInactiveGameMonitorState(config),
+  );
+  broadcastTrackedMatches(gameWatcher.getTrackedMatches());
 }
 
 function restartPollTimer(): void {
@@ -581,6 +620,7 @@ async function runSync(options?: {
         },
       },
     );
+    await pruneTrackedMatchesAgainstState();
     mainWindow?.webContents.send("sync-completed");
   } catch (error) {
     mainWindow?.webContents.send(
@@ -834,6 +874,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle("get-config", async () => toPublicConfig(config));
 
   ipcMain.handle("get-game-monitor-state", async () => getGameMonitorState());
+
+  ipcMain.handle("get-tracked-matches", async () => gameWatcher?.getTrackedMatches() ?? []);
 
   ipcMain.handle("set-config", async (_event, partial: Partial<AppConfig>) => {
     return persistConfig(mergeConfigFromRenderer(config, partial ?? {}));

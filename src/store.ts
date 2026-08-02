@@ -26,6 +26,11 @@ export interface AppConfig {
   launchAtLogin: boolean;
   /** Check GitHub Releases for Overtime updates (installed builds only). */
   autoUpdateEnabled: boolean;
+  /**
+   * Track live / awaiting-sync matches from the Rocket League Stats API.
+   * PC only; requires Stats API. Works with any sync mode when enabled.
+   */
+  liveMatchTrackingEnabled: boolean;
   autoUploadBallchasing: boolean;
   deleteLocalAfterBallchasingUpload: boolean;
   ballchasingToken: string;
@@ -101,6 +106,8 @@ export interface SavedReplayPlayer {
   isPro?: boolean;
   rankTier?: number | null;
   rankDivision?: number | null;
+  /** Stats API spectator shortcut; used to detect bot backfill on the same slot. */
+  shortcut?: number;
 }
 
 export interface SavedReplayRecord {
@@ -169,6 +176,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   minimizeToTrayOnClose: true,
   launchAtLogin: false,
   autoUpdateEnabled: true,
+  liveMatchTrackingEnabled: true,
   autoUploadBallchasing: false,
   deleteLocalAfterBallchasingUpload: false,
   ballchasingToken: "",

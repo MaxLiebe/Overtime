@@ -989,6 +989,52 @@ body.replay-selection-mode .replay-card {
   vertical-align: middle;
 }
 
+.badge.live {
+  background: rgba(220, 60, 60, 0.18);
+  color: #ff8a8a;
+  border: 1px solid rgba(220, 60, 60, 0.45);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+.badge.awaiting-sync {
+  background: rgba(230, 180, 70, 0.14);
+  color: #f0c36a;
+  border: 1px solid rgba(230, 180, 70, 0.4);
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.replay-card--live {
+  box-shadow: inset 3px 0 0 rgba(220, 70, 70, 0.85);
+}
+
+.replay-result--live {
+  color: #ff7a7a;
+  font-size: 0.85rem;
+}
+
+.replay-tracked-hint {
+  margin: 0 0 10px;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 .replay-rank-icon {
   width: 18px;
   height: 18px;
@@ -1439,22 +1485,27 @@ body.replay-selection-mode .replay-card {
 }
 
 .replay-stats-player .replay-mvp,
-.replay-stats-player .replay-pro-tag {
+.replay-stats-player .replay-pro-tag,
+.replay-stats-player .replay-dev-tag {
   margin-left: 0;
 }
 
-.replay-pro-tag {
+.replay-pro-tag,
+.replay-dev-tag {
   flex-shrink: 0;
   font-size: 0.68rem;
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 3px;
   border: none;
-  background: #7c4dff;
   color: #fff;
   cursor: pointer;
   font-family: inherit;
   line-height: 1.2;
+}
+
+.replay-pro-tag {
+  background: #7c4dff;
 }
 
 .replay-pro-tag:hover:not(:disabled) {
@@ -1466,8 +1517,18 @@ body.replay-selection-mode .replay-card {
   opacity: 0.7;
 }
 
-.replay-pro-tag.has-tooltip {
+.replay-pro-tag.has-tooltip,
+.replay-dev-tag.has-tooltip {
   cursor: pointer;
+}
+
+.replay-dev-tag {
+  background: #0d9488;
+  letter-spacing: 0.03em;
+}
+
+.replay-dev-tag:hover {
+  background: #14b8a6;
 }
 
 .pro-player-tooltip-portal {
@@ -1535,6 +1596,20 @@ body.replay-selection-mode .replay-card {
   font-size: 0.8rem;
   font-weight: 600;
   color: #ffd54f;
+}
+
+.dev-player-tooltip {
+  min-width: 240px;
+  max-width: 300px;
+  align-items: flex-start;
+}
+
+.dev-player-tooltip-desc {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .replay-mvp {
@@ -2275,6 +2350,16 @@ label.checkbox input {
   border-top: 1px solid var(--border);
 }
 
+.live-match-tracking-row {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.onboarding-live-match-tracking-row {
+  margin-top: 8px;
+}
+
 .sync-sublegend {
   margin: 16px 0 0;
   color: var(--text-muted);
@@ -2310,20 +2395,19 @@ input[type="number"].inline-number--minutes {
   max-width: 3.1rem;
 }
 
-.stats-api-check {
-  display: none;
-}
-
-.sync-mode-option:has(#process-sync-after-games:checked) .stats-api-check {
-  display: block;
-}
-
 .stats-api-panel {
   margin-top: 10px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: rgba(0, 0, 0, 0.12);
+}
+
+.checkbox-label-with-badge {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .stats-api-panel--needs-fix {

@@ -34,6 +34,11 @@ export function getProcessGamesThreshold(config: AppConfig): number {
   return Math.max(1, Math.floor(value));
 }
 
+/** Live match tracking when the setting is on (PC / Stats API; works in any sync mode). */
+export function isLiveMatchTrackingEnabled(config: AppConfig): boolean {
+  return config.liveMatchTrackingEnabled !== false;
+}
+
 type LegacySyncFields = {
   syncMode?: SyncMode;
   skipSyncWhenGameRunning?: boolean;

@@ -1,17 +1,33 @@
 import type { AppConfig } from "./store.js";
 import { buildGameMonitorState, type GameMonitorState } from "./gameMonitorState.js";
-import { getProcessGamesThreshold, usesProcessSync } from "./syncConfig.js";
+import {
+  getProcessGamesThreshold,
+  isLiveMatchTrackingEnabled,
+  usesProcessSync,
+} from "./syncConfig.js";
 import { isRocketLeagueRunning } from "./rocketLeagueProcess.js";
 import { RocketLeagueStatsClient } from "./rocketLeagueStatsApi.js";
+import {
+  applyUpdateStateToTrackedMatch,
+  createLiveTrackedMatch,
+  markTrackedMatchEnded,
+  type StatsApiUpdateState,
+  type TrackedMatch,
+} from "./trackedMatch.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
+const UPDATE_STATE_EMIT_MIN_MS = 400;
+const MAX_AWAITING_SYNC = 30;
 
 export interface RocketLeagueWatcherOptions {
   getConfig: () => AppConfig;
+  /** Platform player ids / account ids used to detect the local player in Stats API snapshots. */
+  getLinkedPlayerIds?: () => string[];
   pollIntervalMs?: number;
   onGameClosed: () => void;
   onGamesThresholdReached: (gamesPlayed: number) => void;
   onStateChange?: (state: GameMonitorState) => void;
+  onTrackedMatchesChange?: (matches: TrackedMatch[]) => void;
 }
 
 export class RocketLeagueWatcher {
@@ -21,9 +37,12 @@ export class RocketLeagueWatcher {
   private wasRunning = false;
   private initialized = false;
   private gamesSinceLastSync = 0;
-  private lastMatchGuid = "";
+  private lastCountedMatchGuid = "";
   private rocketLeagueRunning = false;
   private statsApiConnected = false;
+  private liveMatch: TrackedMatch | null = null;
+  private awaitingSync: TrackedMatch[] = [];
+  private lastUpdateEmitAt = 0;
 
   constructor(private readonly options: RocketLeagueWatcherOptions) {
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -47,9 +66,12 @@ export class RocketLeagueWatcher {
     this.initialized = false;
     this.wasRunning = false;
     this.gamesSinceLastSync = 0;
-    this.lastMatchGuid = "";
+    this.lastCountedMatchGuid = "";
     this.rocketLeagueRunning = false;
     this.statsApiConnected = false;
+    this.liveMatch = null;
+    this.awaitingSync = [];
+    this.emitTrackedMatches();
   }
 
   getState(): GameMonitorState {
@@ -61,20 +83,84 @@ export class RocketLeagueWatcher {
     });
   }
 
+  getTrackedMatches(): TrackedMatch[] {
+    if (!this.isLiveTrackingEnabled()) {
+      return [];
+    }
+
+    const awaiting = this.awaitingSync.filter(
+      (match) =>
+        !this.liveMatch ||
+        match.matchGuid.toUpperCase() !== this.liveMatch.matchGuid.toUpperCase(),
+    );
+    return this.liveMatch ? [this.liveMatch, ...awaiting] : [...awaiting];
+  }
+
+  private isLiveTrackingEnabled(): boolean {
+    return isLiveMatchTrackingEnabled(this.options.getConfig());
+  }
+
+  private needsStatsClient(): boolean {
+    return this.isLiveTrackingEnabled() || this.getGamesThreshold() > 0;
+  }
+
+  private clearTrackedMatches(): void {
+    const hadTracked = Boolean(this.liveMatch) || this.awaitingSync.length > 0;
+    this.liveMatch = null;
+    this.awaitingSync = [];
+    if (hadTracked) {
+      this.emitTrackedMatches();
+    }
+  }
+
+  /** Drop tracked entries that already have a synced replay file. */
+  pruneSyncedMatchGuids(matchGuids: Iterable<string>): void {
+    const synced = new Set(
+      [...matchGuids].map((guid) => guid.trim().toUpperCase()).filter(Boolean),
+    );
+    if (synced.size === 0) {
+      return;
+    }
+
+    const beforeAwaiting = this.awaitingSync.length;
+    this.awaitingSync = this.awaitingSync.filter(
+      (match) => !synced.has(match.matchGuid.toUpperCase()),
+    );
+
+    let clearedLive = false;
+    if (
+      this.liveMatch &&
+      synced.has(this.liveMatch.matchGuid.toUpperCase()) &&
+      this.liveMatch.status !== "live"
+    ) {
+      this.liveMatch = null;
+      clearedLive = true;
+    }
+
+    if (clearedLive || beforeAwaiting !== this.awaitingSync.length) {
+      this.emitTrackedMatches();
+    }
+  }
+
   private emitState(): void {
     this.options.onStateChange?.(this.getState());
   }
 
-  private async poll(): Promise<void> {
-    if (!usesProcessSync(this.options.getConfig())) {
-      this.rocketLeagueRunning = false;
-      this.disconnectStatsClient();
-      this.emitState();
-      return;
-    }
+  private emitTrackedMatches(): void {
+    this.options.onTrackedMatchesChange?.(this.getTrackedMatches());
+  }
 
+  private linkedPlayerIdSet(): Set<string> {
+    const ids = this.options.getLinkedPlayerIds?.() ?? [];
+    return new Set(
+      ids.map((id) => id.trim().toUpperCase()).filter(Boolean),
+    );
+  }
+
+  private async poll(): Promise<void> {
     this.rocketLeagueRunning = await isRocketLeagueRunning();
     const running = this.rocketLeagueRunning;
+    const processSync = usesProcessSync(this.options.getConfig());
 
     if (!this.initialized) {
       this.wasRunning = running;
@@ -91,13 +177,16 @@ export class RocketLeagueWatcher {
 
     if (this.wasRunning && !running) {
       this.gamesSinceLastSync = 0;
-      this.lastMatchGuid = "";
+      this.lastCountedMatchGuid = "";
+      this.finalizeLiveAsAwaiting();
       this.disconnectStatsClient();
 
-      this.options.onGameClosed();
+      if (processSync) {
+        this.options.onGameClosed();
+      }
     } else if (!this.wasRunning && running) {
       this.gamesSinceLastSync = 0;
-      this.lastMatchGuid = "";
+      this.lastCountedMatchGuid = "";
       this.syncStatsClient();
     } else if (running) {
       this.syncStatsClient();
@@ -109,11 +198,45 @@ export class RocketLeagueWatcher {
     this.emitState();
   }
 
-  private syncStatsClient(): void {
-    const threshold = this.getGamesThreshold();
-    if (threshold <= 0) {
-      this.disconnectStatsClient();
+  private finalizeLiveAsAwaiting(): void {
+    if (!this.liveMatch) {
       return;
+    }
+
+    if (this.isLiveTrackingEnabled()) {
+      if (this.liveMatch.status === "live") {
+        this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+      } else {
+        this.pushAwaiting(this.liveMatch);
+      }
+    }
+
+    this.liveMatch = null;
+    this.emitTrackedMatches();
+  }
+
+  private pushAwaiting(match: TrackedMatch): void {
+    const upper = match.matchGuid.toUpperCase();
+    const awaiting: TrackedMatch = {
+      ...match,
+      status: "awaiting_sync",
+      matchGuid: upper,
+    };
+    this.awaitingSync = [
+      awaiting,
+      ...this.awaitingSync.filter((item) => item.matchGuid.toUpperCase() !== upper),
+    ].slice(0, MAX_AWAITING_SYNC);
+  }
+
+  private syncStatsClient(): void {
+    if (!this.needsStatsClient()) {
+      this.disconnectStatsClient();
+      this.clearTrackedMatches();
+      return;
+    }
+
+    if (!this.isLiveTrackingEnabled()) {
+      this.clearTrackedMatches();
     }
 
     if (this.statsClient?.isActive()) {
@@ -130,8 +253,17 @@ export class RocketLeagueWatcher {
         this.statsApiConnected = false;
         this.emitState();
       },
-      onMatchEnded: (matchGuid) => {
-        this.handleMatchEnded(matchGuid, threshold);
+      onMatchCreated: (matchGuid) => {
+        this.handleMatchCreated(matchGuid);
+      },
+      onUpdateState: (data) => {
+        this.handleUpdateState(data);
+      },
+      onMatchEnded: (matchGuid, winnerTeamNum) => {
+        this.handleMatchEnded(matchGuid, winnerTeamNum);
+      },
+      onMatchDestroyed: (matchGuid) => {
+        this.handleMatchDestroyed(matchGuid);
       },
     });
     this.statsClient.start();
@@ -153,12 +285,91 @@ export class RocketLeagueWatcher {
     return getProcessGamesThreshold(this.options.getConfig());
   }
 
-  private handleMatchEnded(matchGuid: string, threshold: number): void {
-    if (matchGuid === this.lastMatchGuid) {
+  private handleMatchCreated(matchGuid: string): void {
+    if (!this.isLiveTrackingEnabled()) {
       return;
     }
 
-    this.lastMatchGuid = matchGuid;
+    const upper = matchGuid.toUpperCase();
+    if (this.liveMatch?.matchGuid.toUpperCase() === upper) {
+      return;
+    }
+
+    if (this.liveMatch?.status === "live") {
+      this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+    }
+
+    this.awaitingSync = this.awaitingSync.filter(
+      (match) => match.matchGuid.toUpperCase() !== upper,
+    );
+    this.liveMatch = createLiveTrackedMatch(upper);
+    this.emitTrackedMatches();
+  }
+
+  private handleUpdateState(data: StatsApiUpdateState): void {
+    if (!this.isLiveTrackingEnabled()) {
+      return;
+    }
+
+    const matchGuid = data.MatchGuid?.trim().toUpperCase();
+    if (!matchGuid) {
+      return;
+    }
+
+    if (!this.liveMatch || this.liveMatch.matchGuid.toUpperCase() !== matchGuid) {
+      if (this.liveMatch?.status === "live") {
+        this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+      }
+      this.liveMatch = createLiveTrackedMatch(matchGuid);
+    }
+
+    this.liveMatch = applyUpdateStateToTrackedMatch(
+      this.liveMatch,
+      data,
+      this.linkedPlayerIdSet(),
+    );
+
+    const now = Date.now();
+    if (now - this.lastUpdateEmitAt >= UPDATE_STATE_EMIT_MIN_MS) {
+      this.lastUpdateEmitAt = now;
+      this.emitTrackedMatches();
+    }
+  }
+
+  private handleMatchEnded(matchGuid: string, winnerTeamNum?: number): void {
+    const upper = matchGuid.toUpperCase();
+    const threshold = this.getGamesThreshold();
+
+    if (this.isLiveTrackingEnabled()) {
+      if (this.liveMatch && this.liveMatch.matchGuid.toUpperCase() === upper) {
+        const ended = markTrackedMatchEnded(this.liveMatch, winnerTeamNum);
+        this.pushAwaiting(ended);
+        this.liveMatch = null;
+        this.emitTrackedMatches();
+      } else {
+        const existing = this.awaitingSync.find(
+          (match) => match.matchGuid.toUpperCase() === upper,
+        );
+        if (existing) {
+          this.pushAwaiting(markTrackedMatchEnded(existing, winnerTeamNum));
+          this.emitTrackedMatches();
+        } else {
+          const stub = markTrackedMatchEnded(createLiveTrackedMatch(upper), winnerTeamNum);
+          this.pushAwaiting(stub);
+          this.emitTrackedMatches();
+        }
+      }
+    }
+
+    if (threshold <= 0) {
+      return;
+    }
+
+    if (upper === this.lastCountedMatchGuid) {
+      return;
+    }
+
+    this.lastCountedMatchGuid = upper;
     this.gamesSinceLastSync += 1;
     this.emitState();
 
@@ -169,5 +380,26 @@ export class RocketLeagueWatcher {
     this.gamesSinceLastSync = 0;
     this.emitState();
     this.options.onGamesThresholdReached(threshold);
+  }
+
+  private handleMatchDestroyed(matchGuid: string): void {
+    if (!this.isLiveTrackingEnabled()) {
+      return;
+    }
+
+    const upper = matchGuid.toUpperCase();
+    if (!this.liveMatch || this.liveMatch.matchGuid.toUpperCase() !== upper) {
+      return;
+    }
+
+    if (this.liveMatch.status === "live") {
+      // Left without a clean MatchEnded — still keep a snapshot if we have scores.
+      if (this.liveMatch.players.length > 0 || this.liveMatch.team0Score + this.liveMatch.team1Score > 0) {
+        this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+      }
+    }
+
+    this.liveMatch = null;
+    this.emitTrackedMatches();
   }
 }
