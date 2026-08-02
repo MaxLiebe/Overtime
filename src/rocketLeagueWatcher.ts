@@ -11,9 +11,11 @@ import {
   applyUpdateStateToTrackedMatch,
   createLiveTrackedMatch,
   markTrackedMatchEnded,
+  mergeTrackedPlayers,
   type StatsApiUpdateState,
   type TrackedMatch,
 } from "./trackedMatch.js";
+import type { SavedReplayPlayer } from "./store.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 const UPDATE_STATE_EMIT_MIN_MS = 400;
@@ -42,6 +44,8 @@ export class RocketLeagueWatcher {
   private statsApiConnected = false;
   private liveMatch: TrackedMatch | null = null;
   private awaitingSync: TrackedMatch[] = [];
+  /** Union of every player once seen for a match — survives MatchDestroyed / live recreate. */
+  private rosterHistory = new Map<string, SavedReplayPlayer[]>();
   private lastUpdateEmitAt = 0;
 
   constructor(private readonly options: RocketLeagueWatcherOptions) {
@@ -71,6 +75,7 @@ export class RocketLeagueWatcher {
     this.statsApiConnected = false;
     this.liveMatch = null;
     this.awaitingSync = [];
+    this.rosterHistory.clear();
     this.emitTrackedMatches();
   }
 
@@ -108,9 +113,58 @@ export class RocketLeagueWatcher {
     const hadTracked = Boolean(this.liveMatch) || this.awaitingSync.length > 0;
     this.liveMatch = null;
     this.awaitingSync = [];
+    this.rosterHistory.clear();
     if (hadTracked) {
       this.emitTrackedMatches();
     }
+  }
+
+  private rememberRoster(matchGuid: string, players: SavedReplayPlayer[]): SavedReplayPlayer[] {
+    const upper = matchGuid.toUpperCase();
+    const merged = mergeTrackedPlayers(this.rosterHistory.get(upper) ?? [], players);
+    this.rosterHistory.set(upper, merged);
+    return merged;
+  }
+
+  private seedPlayersForMatch(matchGuid: string): SavedReplayPlayer[] {
+    const upper = matchGuid.toUpperCase();
+    const fromHistory = this.rosterHistory.get(upper);
+    if (fromHistory?.length) {
+      return fromHistory;
+    }
+
+    return (
+      this.awaitingSync.find((match) => match.matchGuid.toUpperCase() === upper)?.players ?? []
+    );
+  }
+
+  /** Create or reuse the live row, always seeding previously seen players for this guid. */
+  private ensureLiveMatch(matchGuid: string): TrackedMatch {
+    const upper = matchGuid.toUpperCase();
+    const seedPlayers = this.seedPlayersForMatch(upper);
+
+    if (this.liveMatch?.matchGuid.toUpperCase() === upper) {
+      if (!seedPlayers.length) {
+        return this.liveMatch;
+      }
+      return {
+        ...this.liveMatch,
+        players: mergeTrackedPlayers(seedPlayers, this.liveMatch.players),
+      };
+    }
+
+    if (this.liveMatch?.status === "live") {
+      const previousGuid = this.liveMatch.matchGuid.toUpperCase();
+      this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+      this.rosterHistory.delete(previousGuid);
+    }
+
+    const live = createLiveTrackedMatch(upper);
+    if (!seedPlayers.length) {
+      return live;
+    }
+
+    return { ...live, players: seedPlayers };
   }
 
   /** Drop tracked entries that already have a synced replay file. */
@@ -203,15 +257,21 @@ export class RocketLeagueWatcher {
       return;
     }
 
+    const upper = this.liveMatch.matchGuid.toUpperCase();
     if (this.isLiveTrackingEnabled()) {
-      if (this.liveMatch.status === "live") {
-        this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+      const withRoster = {
+        ...this.liveMatch,
+        players: this.rememberRoster(upper, this.liveMatch.players),
+      };
+      if (withRoster.status === "live") {
+        this.pushAwaiting(markTrackedMatchEnded(withRoster, withRoster.winningTeam));
       } else {
-        this.pushAwaiting(this.liveMatch);
+        this.pushAwaiting(withRoster);
       }
     }
 
     this.liveMatch = null;
+    this.rosterHistory.delete(upper);
     this.emitTrackedMatches();
   }
 
@@ -299,12 +359,15 @@ export class RocketLeagueWatcher {
     }
 
     if (this.liveMatch?.status === "live") {
+      const previousGuid = this.liveMatch.matchGuid.toUpperCase();
       this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+      this.rosterHistory.delete(previousGuid);
     }
 
     this.awaitingSync = this.awaitingSync.filter(
       (match) => match.matchGuid.toUpperCase() !== upper,
     );
+    this.rosterHistory.delete(upper);
     this.liveMatch = createLiveTrackedMatch(upper);
     this.emitTrackedMatches();
   }
@@ -325,7 +388,7 @@ export class RocketLeagueWatcher {
       return;
     }
 
-    this.liveMatch = createLiveTrackedMatch(upper);
+    this.liveMatch = this.ensureLiveMatch(upper);
     this.emitTrackedMatches();
   }
 
@@ -340,19 +403,17 @@ export class RocketLeagueWatcher {
     }
 
     const previousPlayerCount = this.liveMatch?.players.length ?? 0;
-
-    if (!this.liveMatch || this.liveMatch.matchGuid.toUpperCase() !== matchGuid) {
-      if (this.liveMatch?.status === "live") {
-        this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
-      }
-      this.liveMatch = createLiveTrackedMatch(matchGuid);
-    }
+    this.liveMatch = this.ensureLiveMatch(matchGuid);
 
     this.liveMatch = applyUpdateStateToTrackedMatch(
       this.liveMatch,
       data,
       this.linkedPlayerIdSet(),
     );
+    this.liveMatch = {
+      ...this.liveMatch,
+      players: this.rememberRoster(matchGuid, this.liveMatch.players),
+    };
 
     const now = Date.now();
     const rosterChanged =
@@ -370,7 +431,11 @@ export class RocketLeagueWatcher {
 
     if (this.isLiveTrackingEnabled()) {
       if (this.liveMatch && this.liveMatch.matchGuid.toUpperCase() === upper) {
-        const ended = markTrackedMatchEnded(this.liveMatch, winnerTeamNum);
+        const withRoster = {
+          ...this.liveMatch,
+          players: this.rememberRoster(upper, this.liveMatch.players),
+        };
+        const ended = markTrackedMatchEnded(withRoster, winnerTeamNum);
         this.pushAwaiting(ended);
         this.liveMatch = null;
         this.emitTrackedMatches();
@@ -379,10 +444,18 @@ export class RocketLeagueWatcher {
           (match) => match.matchGuid.toUpperCase() === upper,
         );
         if (existing) {
-          this.pushAwaiting(markTrackedMatchEnded(existing, winnerTeamNum));
+          const withRoster = {
+            ...existing,
+            players: this.rememberRoster(upper, existing.players),
+          };
+          this.pushAwaiting(markTrackedMatchEnded(withRoster, winnerTeamNum));
           this.emitTrackedMatches();
         } else {
-          const stub = markTrackedMatchEnded(createLiveTrackedMatch(upper), winnerTeamNum);
+          const seed = this.seedPlayersForMatch(upper);
+          const stub = markTrackedMatchEnded(
+            { ...createLiveTrackedMatch(upper), players: seed },
+            winnerTeamNum,
+          );
           this.pushAwaiting(stub);
           this.emitTrackedMatches();
         }
@@ -417,16 +490,23 @@ export class RocketLeagueWatcher {
 
     const upper = matchGuid.toUpperCase();
     if (!this.liveMatch || this.liveMatch.matchGuid.toUpperCase() !== upper) {
+      // Keep rosterHistory so a late UpdateState can rebuild the live row with leavers.
       return;
     }
 
     if (this.liveMatch.status === "live") {
+      const withRoster = {
+        ...this.liveMatch,
+        players: this.rememberRoster(upper, this.liveMatch.players),
+      };
       // Left without a clean MatchEnded — still keep a snapshot if we have scores.
-      if (this.liveMatch.players.length > 0 || this.liveMatch.team0Score + this.liveMatch.team1Score > 0) {
-        this.pushAwaiting(markTrackedMatchEnded(this.liveMatch, this.liveMatch.winningTeam));
+      if (withRoster.players.length > 0 || withRoster.team0Score + withRoster.team1Score > 0) {
+        this.pushAwaiting(markTrackedMatchEnded(withRoster, withRoster.winningTeam));
       }
     }
 
+    // Clear live row, but keep rosterHistory: UpdateState can resume after a spurious
+    // MatchDestroyed (e.g. when another player leaves) and must reseed leavers.
     this.liveMatch = null;
     this.emitTrackedMatches();
   }

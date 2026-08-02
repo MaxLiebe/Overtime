@@ -104,6 +104,11 @@ function isTrackedBot(player: SavedReplayPlayer): boolean {
   return isPsyonixBotPlayerId(player.playerId);
 }
 
+/** Bots and id-less rows are unstable identities that must not erase a real player. */
+function isUnstableTrackedIdentity(player: SavedReplayPlayer): boolean {
+  return !player.playerId.trim() || isTrackedBot(player);
+}
+
 /** Stable key for roster retention across leaves / bot-fill / shortcut renumbers. */
 function trackedPlayerKey(player: SavedReplayPlayer): string {
   const id = player.playerId.trim().toUpperCase();
@@ -112,7 +117,11 @@ function trackedPlayerKey(player: SavedReplayPlayer): string {
   }
 
   // Bots and id-less players: keep distinct by team + name (shortcut changes on leave).
-  return `name:${player.team}:${player.playerName.trim().toUpperCase()}`;
+  const shortcut =
+    typeof player.shortcut === "number" && Number.isFinite(player.shortcut)
+      ? String(player.shortcut)
+      : "x";
+  return `name:${player.team}:${shortcut}:${player.playerName.trim().toUpperCase()}`;
 }
 
 /**
@@ -156,8 +165,8 @@ export function mergeTrackedPlayers(
     }
 
     const existing = retained.get(key);
-    // Never overwrite a real platform player with a Psyonix bot under the same key.
-    if (existing && !isTrackedBot(existing) && isTrackedBot(player)) {
+    // Never overwrite a stable human row with a bot / empty-id placeholder.
+    if (existing && !isUnstableTrackedIdentity(existing) && isUnstableTrackedIdentity(player)) {
       retained.set(
         `bot:${player.team}:${player.shortcut ?? "x"}:${player.playerName.trim().toUpperCase()}`,
         player,
