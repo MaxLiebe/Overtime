@@ -58,14 +58,12 @@ export {
   type BallchasingVisibility,
 } from "./ballchasing.js";
 export {
-  BALLCHASING_VIEWER_NOTIFIER,
-  BALLCHASING_VIEWER_PORT,
   getBallchasingReplayId,
-  getBakkesModBallchasingCacheDir,
   isBallchasingViewerAvailable,
+  isInGameReplayAvailable,
   isInGameReplaySupported,
   playReplayInGame,
-  stageLocalReplayForViewer,
+  type InGameReplayAvailabilityOptions,
   type PlayReplayInGameOptions,
 } from "./ballchasingViewer.js";
 export {
@@ -96,9 +94,16 @@ export { isRocketLeagueRunning } from "./rocketLeagueProcess.js";
 export {
   DEFAULT_STATS_API_HOST,
   DEFAULT_STATS_API_PORT,
+  DEFAULT_STATS_API_WEB_PORT,
   RocketLeagueStatsClient,
   extractJsonFrames,
+  isStatsApiReachable,
+  isStatsApiWebReachable,
+  loadReplayViaStatsApi,
+  normalizeStatsApiReplayPath,
   parseStatsApiData,
+  sendStatsApiCommandOnce,
+  sendStatsApiCommandWs,
   type MatchEndedData,
   type RocketLeagueStatsClientOptions,
   type StatsApiEnvelope,

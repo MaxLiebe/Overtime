@@ -50,9 +50,16 @@ export interface StatsApiGameState {
   Arena?: string;
   TimeSeconds?: number;
   bOvertime?: boolean;
+  /** True during goal replays and while viewing a saved replay. */
+  bReplay?: boolean;
   bHasWinner?: boolean;
   Winner?: number;
   Teams?: StatsApiTeam[];
+}
+
+export interface ReplayCreatedData {
+  FileName?: string;
+  Date?: string;
 }
 
 export interface StatsApiUpdateState {

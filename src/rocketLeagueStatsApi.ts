@@ -1,4 +1,6 @@
 import net from "node:net";
+import { resolve } from "node:path";
+import WebSocket from "ws";
 import type {
   MatchCreatedData,
   MatchDestroyedData,
@@ -7,6 +9,12 @@ import type {
 
 export const DEFAULT_STATS_API_HOST = "127.0.0.1";
 export const DEFAULT_STATS_API_PORT = 49123;
+export const DEFAULT_STATS_API_WEB_PORT = 49124;
+
+/** Rocket League accepts LoadReplay paths with forward slashes; backslashes are ignored. */
+export function normalizeStatsApiReplayPath(filePath: string): string {
+  return resolve(filePath.trim()).replace(/\\/g, "/");
+}
 
 export interface MatchEndedData {
   MatchGuid?: string;
@@ -90,6 +98,8 @@ export interface RocketLeagueStatsClientOptions {
   onUpdateState?: (data: StatsApiUpdateState) => void;
   onMatchEnded?: (matchGuid: string, winnerTeamNum?: number) => void;
   onMatchDestroyed?: (matchGuid: string) => void;
+  /** Fired when a saved replay starts (not goal replays). */
+  onReplayCreated?: () => void;
   onConnected?: () => void;
   onDisconnected?: () => void;
 }
@@ -132,6 +142,20 @@ export class RocketLeagueStatsClient {
 
   isConnected(): boolean {
     return this.socket !== null && !this.socket.destroyed;
+  }
+
+  /** Send a Stats API command on the active TCP connection. */
+  sendCommand(command: string, data: Record<string, unknown>): boolean {
+    if (!this.isConnected() || !this.socket) {
+      return false;
+    }
+
+    try {
+      this.socket.write(JSON.stringify({ Command: command, Data: data }));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private notifyDisconnected(): void {
@@ -244,9 +268,228 @@ export class RocketLeagueStatsClient {
         if (matchGuid) {
           this.options.onMatchDestroyed?.(matchGuid);
         }
+        return;
+      }
+
+      if (event === "ReplayCreated") {
+        this.options.onReplayCreated?.();
       }
     } catch {
       // Ignore malformed frames while the socket is mid-stream.
     }
   }
+}
+
+export interface StatsApiSocketOptions {
+  host?: string;
+  port?: number;
+  webPort?: number;
+  timeoutMs?: number;
+}
+
+/** Probe whether Rocket League is accepting Stats API TCP connections. */
+export async function isStatsApiReachable(
+  options: StatsApiSocketOptions = {},
+): Promise<boolean> {
+  const host = options.host ?? DEFAULT_STATS_API_HOST;
+  const port = options.port ?? DEFAULT_STATS_API_PORT;
+  const timeoutMs = options.timeoutMs ?? 2000;
+
+  return new Promise((resolvePromise) => {
+    const socket = net.createConnection({ host, port });
+    let settled = false;
+
+    const finish = (reachable: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolvePromise(reachable);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    socket.on("connect", () => finish(true));
+    socket.on("error", () => finish(false));
+  });
+}
+
+/** Probe whether Rocket League's Stats API WebSocket (WebPort) is accepting connections. */
+export async function isStatsApiWebReachable(
+  options: StatsApiSocketOptions = {},
+): Promise<boolean> {
+  const host = options.host ?? DEFAULT_STATS_API_HOST;
+  const webPort = options.webPort ?? DEFAULT_STATS_API_WEB_PORT;
+  const timeoutMs = options.timeoutMs ?? 2000;
+
+  return new Promise((resolvePromise) => {
+    const ws = new WebSocket(`ws://${host}:${webPort}`);
+    let settled = false;
+
+    const finish = (reachable: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      try {
+        ws.terminate();
+      } catch {
+        // ignore
+      }
+      resolvePromise(reachable);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    ws.on("open", () => finish(true));
+    ws.on("error", () => finish(false));
+  });
+}
+
+/**
+ * Open a short-lived Stats API connection, send one command, then disconnect.
+ * Prefer {@link RocketLeagueStatsClient.sendCommand} when a persistent client is already connected
+ * — Rocket League only accepts one TCP client at a time.
+ */
+export async function sendStatsApiCommandOnce(
+  command: string,
+  data: Record<string, unknown>,
+  options: StatsApiSocketOptions = {},
+): Promise<void> {
+  const host = options.host ?? DEFAULT_STATS_API_HOST;
+  const port = options.port ?? DEFAULT_STATS_API_PORT;
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const payload = JSON.stringify({ Command: command, Data: data });
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const socket = net.createConnection({ host, port });
+    let settled = false;
+
+    const finish = (action: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      action();
+      socket.destroy();
+    };
+
+    const timer = setTimeout(() => {
+      finish(() =>
+        reject(new Error("Timed out connecting to Rocket League Stats API.")),
+      );
+    }, timeoutMs);
+
+    socket.on("connect", () => {
+      socket.write(payload, (error) => {
+        if (error) {
+          finish(() => reject(error));
+          return;
+        }
+
+        // Brief pause so the game can ingest the command before we drop the socket.
+        setTimeout(() => finish(() => resolvePromise()), 150);
+      });
+    });
+
+    socket.on("error", (error) => {
+      finish(() =>
+        reject(
+          error instanceof Error
+            ? error
+            : new Error("Could not connect to Rocket League Stats API."),
+        ),
+      );
+    });
+  });
+}
+
+/** Send a Stats API command over the WebSocket WebPort (preferred for LoadReplay). */
+export async function sendStatsApiCommandWs(
+  command: string,
+  data: Record<string, unknown>,
+  options: StatsApiSocketOptions = {},
+): Promise<void> {
+  const host = options.host ?? DEFAULT_STATS_API_HOST;
+  const webPort = options.webPort ?? DEFAULT_STATS_API_WEB_PORT;
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const payload = JSON.stringify({ Command: command, Data: data });
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const ws = new WebSocket(`ws://${host}:${webPort}`);
+    let settled = false;
+
+    const finish = (action: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      action();
+      try {
+        ws.terminate();
+      } catch {
+        // ignore
+      }
+    };
+
+    const timer = setTimeout(() => {
+      finish(() =>
+        reject(new Error("Timed out connecting to Rocket League Stats API WebSocket.")),
+      );
+    }, timeoutMs);
+
+    ws.on("open", () => {
+      ws.send(payload, (error) => {
+        if (error) {
+          finish(() => reject(error));
+          return;
+        }
+
+        // Keep the socket briefly so the game can ingest the command.
+        setTimeout(() => finish(() => resolvePromise()), 250);
+      });
+    });
+
+    ws.on("error", (error) => {
+      finish(() =>
+        reject(
+          error instanceof Error
+            ? error
+            : new Error("Could not connect to Rocket League Stats API WebSocket."),
+        ),
+      );
+    });
+  });
+}
+
+export async function loadReplayViaStatsApi(
+  replayPath: string,
+  options: StatsApiSocketOptions & {
+    sendCommand?: (command: string, data: Record<string, unknown>) => boolean;
+  } = {},
+): Promise<void> {
+  if (!replayPath.trim()) {
+    throw new Error("Replay path is required.");
+  }
+
+  // Forward slashes are required — Windows backslash paths are silently ignored.
+  const data = { Path: normalizeStatsApiReplayPath(replayPath) };
+
+  try {
+    await sendStatsApiCommandWs("LoadReplay", data, options);
+    return;
+  } catch {
+    // Fall through to the TCP socket when WebPort is unavailable.
+  }
+
+  if (options.sendCommand?.("LoadReplay", data)) {
+    return;
+  }
+
+  await sendStatsApiCommandOnce("LoadReplay", data, options);
 }

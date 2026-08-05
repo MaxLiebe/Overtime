@@ -47,6 +47,9 @@ export class RocketLeagueWatcher {
   /** Union of every player once seen for a match — survives MatchDestroyed / live recreate. */
   private rosterHistory = new Map<string, SavedReplayPlayer[]>();
   private lastUpdateEmitAt = 0;
+  /** True between ReplayCreated and the replay session ending — not a live match. */
+  private viewingSavedReplay = false;
+  private savedReplayMatchGuid = "";
 
   constructor(private readonly options: RocketLeagueWatcherOptions) {
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -76,7 +79,29 @@ export class RocketLeagueWatcher {
     this.liveMatch = null;
     this.awaitingSync = [];
     this.rosterHistory.clear();
+    this.clearSavedReplayMode();
     this.emitTrackedMatches();
+  }
+
+  private clearSavedReplayMode(): void {
+    this.viewingSavedReplay = false;
+    this.savedReplayMatchGuid = "";
+  }
+
+  private isSavedReplaySession(matchGuid?: string): boolean {
+    if (!this.viewingSavedReplay) {
+      return false;
+    }
+
+    if (!matchGuid?.trim()) {
+      return true;
+    }
+
+    if (!this.savedReplayMatchGuid) {
+      return true;
+    }
+
+    return matchGuid.trim().toUpperCase() === this.savedReplayMatchGuid;
   }
 
   getState(): GameMonitorState {
@@ -86,6 +111,15 @@ export class RocketLeagueWatcher {
       statsApiConnected: this.statsApiConnected,
       gamesCompletedSinceSync: this.gamesSinceLastSync,
     });
+  }
+
+  isStatsApiConnected(): boolean {
+    return this.statsApiConnected && (this.statsClient?.isConnected() ?? false);
+  }
+
+  /** Send a command on the live Stats API socket when connected. */
+  sendStatsApiCommand(command: string, data: Record<string, unknown>): boolean {
+    return this.statsClient?.sendCommand(command, data) ?? false;
   }
 
   getTrackedMatches(): TrackedMatch[] {
@@ -114,6 +148,7 @@ export class RocketLeagueWatcher {
     this.liveMatch = null;
     this.awaitingSync = [];
     this.rosterHistory.clear();
+    this.clearSavedReplayMode();
     if (hadTracked) {
       this.emitTrackedMatches();
     }
@@ -232,6 +267,7 @@ export class RocketLeagueWatcher {
     if (this.wasRunning && !running) {
       this.gamesSinceLastSync = 0;
       this.lastCountedMatchGuid = "";
+      this.clearSavedReplayMode();
       this.finalizeLiveAsAwaiting();
       this.disconnectStatsClient();
 
@@ -241,6 +277,7 @@ export class RocketLeagueWatcher {
     } else if (!this.wasRunning && running) {
       this.gamesSinceLastSync = 0;
       this.lastCountedMatchGuid = "";
+      this.clearSavedReplayMode();
       this.syncStatsClient();
     } else if (running) {
       this.syncStatsClient();
@@ -258,6 +295,13 @@ export class RocketLeagueWatcher {
     }
 
     const upper = this.liveMatch.matchGuid.toUpperCase();
+    if (this.isSavedReplaySession(upper)) {
+      this.liveMatch = null;
+      this.rosterHistory.delete(upper);
+      this.emitTrackedMatches();
+      return;
+    }
+
     if (this.isLiveTrackingEnabled()) {
       const withRoster = {
         ...this.liveMatch,
@@ -328,6 +372,9 @@ export class RocketLeagueWatcher {
       onMatchDestroyed: (matchGuid) => {
         this.handleMatchDestroyed(matchGuid);
       },
+      onReplayCreated: () => {
+        this.handleReplayCreated();
+      },
     });
     this.statsClient.start();
     this.statsApiConnected = false;
@@ -344,6 +391,21 @@ export class RocketLeagueWatcher {
     this.statsApiConnected = false;
   }
 
+  /** Saved-replay viewing emits the same match lifecycle events as live games. */
+  private handleReplayCreated(): void {
+    this.viewingSavedReplay = true;
+
+    if (this.liveMatch) {
+      const upper = this.liveMatch.matchGuid.toUpperCase();
+      this.liveMatch = null;
+      this.rosterHistory.delete(upper);
+      this.awaitingSync = this.awaitingSync.filter(
+        (match) => match.matchGuid.toUpperCase() !== upper,
+      );
+      this.emitTrackedMatches();
+    }
+  }
+
   private getGamesThreshold(): number {
     return getProcessGamesThreshold(this.options.getConfig());
   }
@@ -354,6 +416,11 @@ export class RocketLeagueWatcher {
     }
 
     const upper = matchGuid.toUpperCase();
+    if (this.viewingSavedReplay) {
+      this.savedReplayMatchGuid = upper;
+      return;
+    }
+
     if (this.liveMatch?.matchGuid.toUpperCase() === upper) {
       return;
     }
@@ -379,6 +446,11 @@ export class RocketLeagueWatcher {
     }
 
     const upper = matchGuid.toUpperCase();
+    if (this.isSavedReplaySession(upper)) {
+      this.savedReplayMatchGuid = this.savedReplayMatchGuid || upper;
+      return;
+    }
+
     if (this.liveMatch?.matchGuid.toUpperCase() === upper) {
       return;
     }
@@ -400,6 +472,19 @@ export class RocketLeagueWatcher {
     const matchGuid = data.MatchGuid?.trim().toUpperCase();
     if (!matchGuid) {
       return;
+    }
+
+    if (this.isSavedReplaySession(matchGuid)) {
+      this.savedReplayMatchGuid = this.savedReplayMatchGuid || matchGuid;
+      return;
+    }
+
+    // Goal replays set bReplay on the current live match — keep updating that row.
+    // Never start tracking from an UpdateState that is already inside a replay.
+    if (data.Game?.bReplay === true) {
+      if (!this.liveMatch || this.liveMatch.matchGuid.toUpperCase() !== matchGuid) {
+        return;
+      }
     }
 
     const previousPlayerCount = this.liveMatch?.players.length ?? 0;
@@ -428,6 +513,16 @@ export class RocketLeagueWatcher {
   private handleMatchEnded(matchGuid: string, winnerTeamNum?: number): void {
     const upper = matchGuid.toUpperCase();
     const threshold = this.getGamesThreshold();
+
+    if (this.isSavedReplaySession(upper)) {
+      this.savedReplayMatchGuid = this.savedReplayMatchGuid || upper;
+      if (this.liveMatch?.matchGuid.toUpperCase() === upper) {
+        this.liveMatch = null;
+        this.rosterHistory.delete(upper);
+        this.emitTrackedMatches();
+      }
+      return;
+    }
 
     if (this.isLiveTrackingEnabled()) {
       if (this.liveMatch && this.liveMatch.matchGuid.toUpperCase() === upper) {
@@ -485,10 +580,24 @@ export class RocketLeagueWatcher {
 
   private handleMatchDestroyed(matchGuid: string): void {
     if (!this.isLiveTrackingEnabled()) {
+      if (this.isSavedReplaySession(matchGuid)) {
+        this.clearSavedReplayMode();
+      }
       return;
     }
 
     const upper = matchGuid.toUpperCase();
+
+    if (this.isSavedReplaySession(upper)) {
+      if (this.liveMatch?.matchGuid.toUpperCase() === upper) {
+        this.liveMatch = null;
+        this.rosterHistory.delete(upper);
+      }
+      this.clearSavedReplayMode();
+      this.emitTrackedMatches();
+      return;
+    }
+
     if (!this.liveMatch || this.liveMatch.matchGuid.toUpperCase() !== upper) {
       // Keep rosterHistory so a late UpdateState can rebuild the live row with leavers.
       return;

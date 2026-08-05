@@ -1,7 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DEFAULT_STATS_API_PORT } from "./rocketLeagueStatsApi.js";
+import {
+  DEFAULT_STATS_API_PORT,
+  DEFAULT_STATS_API_WEB_PORT,
+} from "./rocketLeagueStatsApi.js";
 import { getUserTagameConfigDirCandidates } from "./replays.js";
 
 export const STATS_API_DOCS_URL = "https://www.rocketleague.com/en/developer/stats-api";
@@ -15,6 +18,7 @@ export interface StatsApiConfigLocation {
   exists: boolean;
   packetSendRate?: number;
   port?: number;
+  webPort?: number;
   enabled: boolean;
 }
 
@@ -68,6 +72,7 @@ export async function readStatsApiConfig(path: string): Promise<StatsApiConfigLo
     const content = await readFile(path, "utf8");
     const packetSendRate = parseIniValue(content, "PacketSendRate");
     const port = parseIniValue(content, "Port") ?? DEFAULT_STATS_API_PORT;
+    const webPort = parseIniValue(content, "WebPort") ?? DEFAULT_STATS_API_WEB_PORT;
     const enabled = (packetSendRate ?? 0) > 0;
 
     return {
@@ -75,6 +80,7 @@ export async function readStatsApiConfig(path: string): Promise<StatsApiConfigLo
       exists: true,
       packetSendRate,
       port,
+      webPort,
       enabled,
     };
   } catch {
@@ -89,7 +95,11 @@ export async function readStatsApiConfig(path: string): Promise<StatsApiConfigLo
 function upsertStatsApiIni(content: string): string {
   const lines = content.length > 0 ? content.replace(/\r\n/g, "\n").split("\n") : [];
   const sectionIndex = lines.findIndex((line) => line.trim() === STATS_API_SECTION);
-  const sectionLines = ["Port=49123", `PacketSendRate=${DEFAULT_PACKET_SEND_RATE}`];
+  const sectionLines = [
+    "Port=49123",
+    "WebPort=49124",
+    `PacketSendRate=${DEFAULT_PACKET_SEND_RATE}`,
+  ];
 
   if (sectionIndex >= 0) {
     let endIndex = sectionIndex + 1;
@@ -99,7 +109,7 @@ function upsertStatsApiIni(content: string): string {
 
     const preserved = lines
       .slice(sectionIndex + 1, endIndex)
-      .filter((line) => !/^\s*(Port|PacketSendRate)\s*=/.test(line));
+      .filter((line) => !/^\s*(Port|WebPort|PacketSendRate)\s*=/.test(line));
 
     const nextSection = [STATS_API_SECTION, ...sectionLines, ...preserved];
     return [
@@ -143,7 +153,7 @@ export async function checkStatsApiStatus(
       status: "ready",
       message: "Stats API is configured.",
       detail:
-        "Overtime can track live matches and sync after a set number of games during your session.",
+        "Overtime can track live matches, sync after a set number of games, and play saved replays in-game.",
       configPath,
       packetSendRate: config.packetSendRate,
       port: config.port,

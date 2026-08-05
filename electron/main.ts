@@ -72,6 +72,8 @@ import {
   createInactiveGameMonitorState,
   checkStatsApiStatus,
   fixStatsApiConfig,
+  getTAStatsApiConfigPath,
+  readStatsApiConfig,
   type TrackedMatch,
   playReplayInGame,
   resolveProPlayerProfile,
@@ -1459,7 +1461,14 @@ function registerIpcHandlers(): void {
     },
   );
 
-  ipcMain.handle("check-ballchasing-viewer", async () => isBallchasingViewerAvailable());
+  ipcMain.handle("check-ballchasing-viewer", async () => {
+    const statsConfig = await readStatsApiConfig(getTAStatsApiConfigPath(config.replayDir));
+    return isBallchasingViewerAvailable({
+      port: statsConfig.port,
+      webPort: statsConfig.webPort,
+      isStatsApiConnected: () => gameWatcher?.isStatsApiConnected() ?? false,
+    });
+  });
 
   ipcMain.handle(
     "get-pro-player-profile",
@@ -1482,12 +1491,17 @@ function registerIpcHandlers(): void {
       const filePath = payload.filePath?.trim()
         ? resolveSafeReplayPath(payload.filePath)
         : undefined;
+      const statsConfig = await readStatsApiConfig(getTAStatsApiConfigPath(config.replayDir));
       return playReplayInGame({
         ballchasingId: payload.ballchasingId,
         ballchasingUrl: payload.ballchasingUrl,
         filePath,
         matchGuid: payload.matchGuid,
         token: config.ballchasingToken,
+        port: statsConfig.port,
+        webPort: statsConfig.webPort,
+        isStatsApiConnected: () => gameWatcher?.isStatsApiConnected() ?? false,
+        sendCommand: (command, data) => gameWatcher?.sendStatsApiCommand(command, data) ?? false,
       });
     },
   );

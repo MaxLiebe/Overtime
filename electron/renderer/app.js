@@ -1205,7 +1205,7 @@ async function refreshBallchasingViewerAvailability() {
 }
 
 const PLAY_UNAVAILABLE_TITLE =
-  "Play this replay in Rocket League. Requires Rocket League running without anti-cheat, BakkesMod enabled, and the Ballchasing Replay Viewer plugin installed.";
+  "Play this replay in Rocket League. Requires Rocket League running with the Stats API enabled (PacketSendRate > 0).";
 
 /** @type {string | null} */
 let openReplayMenuGuid = null;
@@ -1786,6 +1786,8 @@ async function playReplayInGame(replay) {
       filePath: merged.filePath,
       matchGuid: merged.matchGuid,
     });
+    elements.syncBanner.textContent = "Opening replay in Rocket League…";
+    elements.syncBanner.classList.remove("hidden", "error");
   } catch (error) {
     elements.syncBanner.textContent =
       error instanceof Error ? error.message : String(error);
