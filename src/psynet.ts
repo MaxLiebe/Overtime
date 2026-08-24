@@ -1,8 +1,9 @@
 import WebSocket from "ws";
 import { decodeBuildId } from "./buildId.js";
-import { BASE_URL, FEATURE_SET, GAME_VERSION, PING_INTERVAL_MS, PONG_TIMEOUT_MS } from "./constants.js";
+import { BASE_URL, PING_INTERVAL_MS, PONG_TIMEOUT_MS } from "./constants.js";
 import { newPlayerId, type PlayerId } from "./playerId.js";
 import { generatePsySig } from "./psySig.js";
+import { resolvePsyNetVersion } from "./psyNetVersion.js";
 import { RequestIdCounter } from "./requestId.js";
 import {
   EventType,
@@ -24,10 +25,13 @@ export class PsyNet {
     fetchFn?: typeof fetch;
     gameVersion?: string;
     featureSet?: string;
+    /** Prefer Launch.log next to this demos folder when resolving the client version. */
+    replayDir?: string;
   }) {
     this.fetchFn = options?.fetchFn ?? fetch;
-    this.gameVersion = options?.gameVersion ?? GAME_VERSION;
-    this.featureSet = options?.featureSet ?? FEATURE_SET;
+    const detected = resolvePsyNetVersion({ replayDir: options?.replayDir });
+    this.gameVersion = options?.gameVersion ?? detected.gameVersion;
+    this.featureSet = options?.featureSet ?? detected.featureSet;
     this.buildId = String(decodeBuildId(this.gameVersion));
   }
 
@@ -164,6 +168,13 @@ export class PsyNet {
     };
 
     if (wrapper.Error) {
+      if (wrapper.Error.Type === "VersionMismatch") {
+        throw new PsyNetRequestError({
+          Type: wrapper.Error.Type,
+          Message:
+            "Rocket League PsyNet rejected this client version. Launch Rocket League once so Overtime can read the latest build from Launch.log, then try again.",
+        });
+      }
       throw new PsyNetRequestError(wrapper.Error);
     }
 

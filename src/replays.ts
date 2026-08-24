@@ -2,7 +2,7 @@ import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { execSync } from "node:child_process";
 import { homedir, platform } from "node:os";
 import { join, dirname } from "node:path";
-import { GAME_VERSION } from "./constants.js";
+import { resolvePsyNetVersion } from "./psyNetVersion.js";
 import { buildReplaySyncFileName, type ReplayFileNameContext } from "./format.js";
 import { uniqueReplayDestination } from "./replayImport.js";
 import {
@@ -390,9 +390,10 @@ export async function downloadReplay(
 
   const fileName = getReplayFileName(entry.Match, context);
   const destination = await uniqueReplayDestination(replayDir, fileName);
+  const { gameVersion } = resolvePsyNetVersion({ replayDir });
   const response = await fetchFn(entry.ReplayUrl, {
     headers: {
-      "User-Agent": `RL Win/${GAME_VERSION} gzip`,
+      "User-Agent": `RL Win/${gameVersion} gzip`,
     },
   });
 

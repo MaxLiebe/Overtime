@@ -1,6 +1,7 @@
 export const BASE_URL = "https://api.rlpp.psynet.gg/rpc";
-export const GAME_VERSION = "260616.79869.520762";
-export const FEATURE_SET = "PrimeUpdate59";
+/** Fallback when Launch.log is unavailable — keep roughly current with the live client. */
+export const GAME_VERSION = "260811.1257.524913";
+export const FEATURE_SET = "PrimeUpdate59_1";
 export const PSY_SIG_KEY = "c338bd36fb8c42b1a431d30add939fc7";
 
 export const PING_INTERVAL_MS = 20_000;

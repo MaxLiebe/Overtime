@@ -255,6 +255,11 @@ export { newPlayerId, parsePlayerId, type Platform, type PlayerId } from "./play
 export { generatePsySig } from "./psySig.js";
 export { decodeBuildId } from "./buildId.js";
 export {
+  resolvePsyNetVersion,
+  getLaunchLogCandidates,
+  type PsyNetVersionInfo,
+} from "./psyNetVersion.js";
+export {
   GAME_VERSION,
   FEATURE_SET,
   BASE_URL,
