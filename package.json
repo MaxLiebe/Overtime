@@ -28,7 +28,7 @@
     "pack:installer": "npm run build:icons && npm run build:electron && electron-builder --win nsis",
     "pack:portable": "npm run build:icons && npm run build:electron && electron-builder --win portable",
     "pack:linux": "npm run build:icons && npm run build:electron && electron-builder --linux AppImage deb",
-    "publish:win": "npm run build:icons && npm run build:electron && electron-builder --win nsis portable -p always"
+    "publish:win": "npm run build:icons && npm run build:electron && electron-builder --win nsis portable -p always && node scripts/finalize-github-release.mjs"
   },
   "dependencies": {
     "@jsonjoy.com/json-pack": "^18.28.0",
