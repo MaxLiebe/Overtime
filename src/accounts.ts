@@ -530,6 +530,9 @@ export function upsertAccountFromEos(
     displayName: string;
     eosRefreshToken: string;
     eosRefreshExpiresAt?: string;
+    refreshToken?: string;
+    accessToken?: string;
+    accessTokenExpiresAt?: string;
     deviceAuth?: EpicDeviceAuthCredentials;
   },
 ): LinkedAccount[] {
@@ -543,9 +546,9 @@ export function upsertAccountFromEos(
   next.unshift({
     accountId: session.accountId,
     displayName: session.displayName,
-    refreshToken: existing?.refreshToken ?? "",
-    accessToken: existing?.accessToken,
-    accessTokenExpiresAt: existing?.accessTokenExpiresAt,
+    refreshToken: session.refreshToken?.trim() || existing?.refreshToken || "",
+    accessToken: session.accessToken ?? existing?.accessToken,
+    accessTokenExpiresAt: session.accessTokenExpiresAt ?? existing?.accessTokenExpiresAt,
     eosRefreshToken: eosSession.eosRefreshToken,
     eosRefreshExpiresAt: eosSession.eosRefreshExpiresAt,
     deviceAuth: session.deviceAuth ?? existing?.deviceAuth,

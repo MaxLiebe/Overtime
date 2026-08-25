@@ -6,6 +6,8 @@ import {
   EGS_CLIENT_SECRET,
   EGS_DEVICE_AUTH_CLIENT_ID,
   EGS_DEVICE_AUTH_CLIENT_SECRET,
+  EGS_DEVICE_CODE_CLIENT_ID,
+  EGS_DEVICE_CODE_CLIENT_SECRET,
   EGS_OAUTH_HOST,
   EGS_USER_AGENT,
 } from "./constants.js";
@@ -17,6 +19,20 @@ import type {
 } from "./types.js";
 
 export const EPIC_DEVICE_AUTH_CANCELLED = "Epic sign-in was cancelled.";
+
+function clientSecretForId(clientId: string): string {
+  if (clientId === EGS_DEVICE_AUTH_CLIENT_ID) {
+    return EGS_DEVICE_AUTH_CLIENT_SECRET;
+  }
+  if (clientId === EGS_DEVICE_CODE_CLIENT_ID) {
+    return EGS_DEVICE_CODE_CLIENT_SECRET;
+  }
+  if (clientId === EGS_CLIENT_ID) {
+    return EGS_CLIENT_SECRET;
+  }
+  // Fall back to the lasting-login client — unknown ids cannot use device_auth.
+  return EGS_DEVICE_AUTH_CLIENT_SECRET;
+}
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -172,12 +188,82 @@ export class EGS {
         token_type: "eg1",
       },
       credentials.clientId,
-      credentials.clientId === EGS_DEVICE_AUTH_CLIENT_ID
-        ? EGS_DEVICE_AUTH_CLIENT_SECRET
-        : credentials.clientId === EGS_CLIENT_ID
-          ? EGS_CLIENT_SECRET
-          : EGS_DEVICE_AUTH_CLIENT_SECRET,
+      clientSecretForId(credentials.clientId),
     );
+  }
+
+  /**
+   * Start EG1 device-code login with the Fortnite Switch client.
+   * Requires a client_credentials bearer (Basic auth is rejected by Epic).
+   * After login we exchange into the iOS client to create lasting device_auth.
+   */
+  async startEg1DeviceAuthorization(): Promise<DeviceAuthResponse> {
+    const clientToken = await this.requestToken(
+      {
+        grant_type: "client_credentials",
+        token_type: "eg1",
+      },
+      EGS_DEVICE_CODE_CLIENT_ID,
+      EGS_DEVICE_CODE_CLIENT_SECRET,
+    );
+
+    const response = await this.fetchFn(
+      `https://${EGS_OAUTH_HOST}/account/api/oauth/deviceAuthorization`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `bearer ${clientToken.access_token}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": EGS_USER_AGENT,
+        },
+        body: "",
+      },
+    );
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`EG1 device authorization failed: ${response.status} - ${text}`);
+    }
+
+    const device = JSON.parse(text) as DeviceAuthResponse;
+    if (!device.device_code?.trim() || !device.user_code?.trim()) {
+      throw new Error("EG1 device authorization failed: incomplete response");
+    }
+
+    if (!device.verification_uri?.trim()) {
+      device.verification_uri = "https://www.epicgames.com/activate";
+    }
+
+    return device;
+  }
+
+  async waitForEg1DeviceAuthorization(
+    device: DeviceAuthResponse,
+    options?: { signal?: AbortSignal },
+  ): Promise<TokenResponse> {
+    const attempts = Math.max(1, Math.floor(device.expires_in / Math.max(1, device.interval)));
+
+    for (let i = 0; i < attempts; i++) {
+      if (options?.signal?.aborted) {
+        throw new Error(EPIC_DEVICE_AUTH_CANCELLED);
+      }
+
+      try {
+        return await this.requestToken(
+          {
+            grant_type: "device_code",
+            device_code: device.device_code,
+            token_type: "eg1",
+          },
+          EGS_DEVICE_CODE_CLIENT_ID,
+          EGS_DEVICE_CODE_CLIENT_SECRET,
+        );
+      } catch {
+        await abortableDelay(Math.max(1, device.interval) * 1000, options?.signal);
+      }
+    }
+
+    throw new Error("device authorization timed out");
   }
 
   async createDeviceAuth(

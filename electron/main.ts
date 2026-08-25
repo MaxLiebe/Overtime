@@ -675,6 +675,12 @@ async function addEpicAccount(_forceAccountPicker = true): Promise<LinkedAccount
       mainWindow?.webContents.send("epic-device-auth-started", progress);
     });
 
+    if (!session.deviceAuth?.deviceId?.trim() || !session.deviceAuth.secret?.trim()) {
+      throw new Error(
+        "Could not create a lasting Epic login. Please try adding the account again.",
+      );
+    }
+
     pendingFreshEos.set(session.accountId, eosToken);
     accounts = await modifyAccounts(paths.accountsPath, (current) =>
       upsertAccountFromEos(current, {
@@ -682,6 +688,7 @@ async function addEpicAccount(_forceAccountPicker = true): Promise<LinkedAccount
         displayName: session.displayName,
         eosRefreshToken: session.eosRefreshToken,
         eosRefreshExpiresAt: session.eosRefreshExpiresAt,
+        refreshToken: session.refreshToken,
         deviceAuth: session.deviceAuth,
       }),
     );

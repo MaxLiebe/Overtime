@@ -12,13 +12,15 @@ import {
 import { accountHasDeviceAuth } from "./deviceAuthStore.js";
 
 /**
- * Create long-lived device_auth credentials from any usable EG1/EOS access token
- * by exchanging into the iOS client (which can create deviceAuths).
+ * Create long-lived device_auth credentials from an EG1 access token
+ * by exchanging into the Fortnite iOS client (which can create deviceAuths).
+ * EOS tokens cannot create device_auth — use an EG1 launcher/Switch/iOS token.
  */
 export async function provisionDeviceAuthFromAccessToken(
   accessToken: string,
 ): Promise<EpicDeviceAuthCredentials> {
   const egs = new EGS();
+  // Requires an EG1 access token (launcher or iOS). EOS tokens cannot create device_auth.
   const exchangeCode = await egs.getExchangeCode(accessToken);
   const iosAuth = await egs.authenticateWithExchangeCode(
     exchangeCode,

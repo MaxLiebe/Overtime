@@ -2,6 +2,7 @@
  * Finalize the GitHub Release created by electron-builder:
  * - title: "Overtime <version>" (matches prior releases)
  * - publish draft → public
+ * - optional body from RELEASE_NOTES
  *
  * Requires GH_TOKEN or GITHUB_TOKEN with repo release permissions.
  */
@@ -64,12 +65,14 @@ async function main() {
     throw new Error(`No GitHub release found for tag ${tag}.`);
   }
 
+  const releaseNotes = (process.env.RELEASE_NOTES || "").trim();
   const updated = await github(`/repos/${OWNER}/${REPO}/releases/${release.id}`, {
     method: "PATCH",
     body: {
       name: releaseName,
       draft: false,
       prerelease: false,
+      ...(releaseNotes ? { body: releaseNotes } : {}),
     },
   });
 

@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { EGS } from "./egs.js";
+import { EGS, EPIC_DEVICE_AUTH_CANCELLED } from "./egs.js";
 import { PsyNet, PsyNetRPC } from "./psynet.js";
 import type { EpicDeviceAuthCredentials, EosTokenResponse, TokenResponse } from "./types.js";
 import {
@@ -416,11 +416,12 @@ export async function loginWithDeviceCode(): Promise<{
 }
 
 export type DeviceAuthorizationRequest = Awaited<
-  ReturnType<EGS["authenticateWithDevice"]>
+  ReturnType<EGS["startEg1DeviceAuthorization"]>
 >;
 
 export async function startDeviceAuthorization(): Promise<DeviceAuthorizationRequest> {
-  return new EGS().authenticateWithDevice();
+  // EG1 Switch device-code → exchange to iOS → lasting device_auth (see completeDeviceAuthorization).
+  return new EGS().startEg1DeviceAuthorization();
 }
 
 export async function completeDeviceAuthorization(
@@ -428,11 +429,33 @@ export async function completeDeviceAuthorization(
   options?: { signal?: AbortSignal },
 ): Promise<{ eosToken: EosTokenResponse; session: AuthenticatedSession }> {
   const egs = new EGS();
-  const eosToken = await egs.waitForDeviceAuthorization(device, options);
-  const session = await authenticateFromEosToken(eosToken, "");
-  const deviceAuth = await tryProvisionDeviceAuthFromAccessToken(eosToken.access_token);
+  // Switch client: device_code works. iOS client: can create lasting device_auth.
+  const switchAuth = await egs.waitForEg1DeviceAuthorization(device, options);
+
+  const toIosExchange = await egs.getExchangeCode(switchAuth.access_token);
+  const iosAuth = await egs.authenticateWithExchangeCode(toIosExchange);
+
+  // Must succeed — without device_auth, sessions die when short-lived tokens expire (~1 day).
+  const deviceAuth = await egs.createDeviceAuth(iosAuth.access_token, iosAuth.account_id);
+
+  const toEosExchange = await egs.getExchangeCode(iosAuth.access_token);
+  const eosToken = await egs.exchangeEosToken(toEosExchange);
+  if (options?.signal?.aborted) {
+    throw new Error(EPIC_DEVICE_AUTH_CANCELLED);
+  }
+
+  const session = await authenticateFromEosToken(
+    eosToken,
+    iosAuth.displayName || switchAuth.displayName,
+    iosAuth.refresh_token,
+  );
+
   return {
     eosToken,
-    session: deviceAuth ? { ...session, deviceAuth } : session,
+    session: {
+      ...session,
+      deviceAuth,
+      refreshToken: iosAuth.refresh_token?.trim() || session.refreshToken,
+    },
   };
 }

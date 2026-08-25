@@ -2502,9 +2502,11 @@ function renderAccounts() {
 
     const statusHint = account.lastSyncError
       ? `<span class="hint account-error">${account.lastSyncError}</span>`
-      : account.lastSyncMessage
-        ? `<span class="hint">${account.lastSyncMessage}</span>`
-        : "";
+      : account.hasDeviceAuth === false
+        ? `<span class="hint account-error">Short-lived login — remove and re-add this account so Overtime can keep you signed in.</span>`
+        : account.lastSyncMessage
+          ? `<span class="hint">${account.lastSyncMessage}</span>`
+          : "";
 
     card.innerHTML = `
       <div class="account-card-main">
