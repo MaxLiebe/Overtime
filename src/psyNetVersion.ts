@@ -1,7 +1,8 @@
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { FEATURE_SET, GAME_VERSION } from "./constants.js";
+import { getWindowsDocumentsCandidates } from "./windowsDocuments.js";
 
 export interface PsyNetVersionInfo {
   gameVersion: string;
@@ -17,24 +18,28 @@ interface CachedLaunchLogVersion {
 
 let cachedFromLog: CachedLaunchLogVersion | null = null;
 
+/** Extra replay dirs supplied by the app config, searched before the auto-detected ones. */
+const searchHints = new Set<string>();
+
 const RL_LOGS_SUFFIX = join("My Games", "Rocket League", "TAGame", "Logs");
 
-function getWindowsDocumentsCandidates(): string[] {
-  const home = homedir();
-  const candidates = [
-    process.env.OneDrive ? join(process.env.OneDrive, "Documents") : undefined,
-    process.env.OneDrive ? join(process.env.OneDrive, "Documenten") : undefined,
-    process.env.OneDriveCommercial
-      ? join(process.env.OneDriveCommercial, "Documents")
-      : undefined,
-    process.env.OneDriveCommercial
-      ? join(process.env.OneDriveCommercial, "Documenten")
-      : undefined,
-    join(home, "Documents"),
-    join(home, "OneDrive", "Documents"),
-  ].filter((value): value is string => Boolean(value));
+/**
+ * Register a replay dir (e.g. from app config) whose sibling `Logs\Launch.log` should be
+ * searched. Lets callers that cannot thread `replayDir` through — such as the auth flow —
+ * still benefit from a custom Rocket League install location.
+ */
+export function addLaunchLogSearchHint(replayDir: string | undefined | null): void {
+  const normalized = String(replayDir ?? "").trim();
+  if (normalized) {
+    searchHints.add(normalized);
+  }
+}
 
-  return [...new Set(candidates)];
+function launchLogPathForReplayDir(replayDir: string): string {
+  // .../TAGame/Demos -> .../TAGame/Logs/Launch.log
+  const normalized = replayDir.trim().replace(/[\\/]+$/, "");
+  const tagameDir = normalized.replace(/[\\/]Demos$/i, "");
+  return join(tagameDir, "Logs", "Launch.log");
 }
 
 export function getLaunchLogCandidates(replayDir?: string): string[] {
@@ -50,10 +55,11 @@ export function getLaunchLogCandidates(replayDir?: string): string[] {
   };
 
   if (replayDir?.trim()) {
-    // .../TAGame/Demos -> .../TAGame/Logs/Launch.log
-    const normalized = replayDir.trim().replace(/[\\/]+$/, "");
-    const tagameDir = normalized.replace(/[\\/]Demos$/i, "");
-    add(join(tagameDir, "Logs", "Launch.log"));
+    add(launchLogPathForReplayDir(replayDir));
+  }
+
+  for (const hint of searchHints) {
+    add(launchLogPathForReplayDir(hint));
   }
 
   switch (platform()) {
@@ -84,18 +90,46 @@ export function getLaunchLogCandidates(replayDir?: string): string[] {
 }
 
 function parseLaunchLogVersion(content: string): PsyNetVersionInfo | null {
+  // Psyonix widens these values between updates (`260811.1257.524913` ->
+  // `260918.75141.528314`, `PrimeUpdate59_1` -> `PrimeUpdate60`), so match shapes
+  // rather than exact digit counts or a `PrimeUpdate` prefix.
   const gameVersion =
-    content.match(/GPsyonixBuildID\s+(\d+\.\d+\.\d+)/i)?.[1]?.trim() ??
-    content.match(/RL Win\/(\d+\.\d+\.\d+)/i)?.[1]?.trim();
+    content.match(/GPsyonixBuildID[:\s]+(\d+(?:\.\d+)+)/i)?.[1]?.trim() ??
+    content.match(/RL Win\/(\d+(?:\.\d+)+)/i)?.[1]?.trim();
   const featureSet =
-    content.match(/Using feature set\s+(PrimeUpdate\w+)/i)?.[1]?.trim() ??
-    content.match(/FeatureSet["\s:=]+(PrimeUpdate\w+)/i)?.[1]?.trim();
+    content.match(/Using feature set[:\s]+([A-Za-z0-9_.]+)/i)?.[1]?.trim() ??
+    content.match(/FeatureSet["\s:=]+([A-Za-z0-9_.]+)/i)?.[1]?.trim();
 
   if (!gameVersion || !featureSet) {
     return null;
   }
 
   return { gameVersion, featureSet };
+}
+
+/** Both markers are logged in the first seconds of startup, well inside this window. */
+const LAUNCH_LOG_HEAD_BYTES = 512 * 1024;
+
+function readFileHead(path: string, maxBytes: number): string {
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = readSync(fd, buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readLaunchLogVersion(path: string): PsyNetVersionInfo | null {
+  const head = readFileHead(path, LAUNCH_LOG_HEAD_BYTES);
+  const fromHead = parseLaunchLogVersion(head);
+  if (fromHead || head.length < LAUNCH_LOG_HEAD_BYTES) {
+    return fromHead;
+  }
+
+  // Launch.log grows to several MB; only pay for a full read when the head came up empty.
+  return parseLaunchLogVersion(readFileSync(path, "utf8"));
 }
 
 /**
@@ -112,25 +146,36 @@ export function resolvePsyNetVersion(options?: {
     featureSet: FEATURE_SET,
   };
 
+  const existing: Array<{ path: string; mtimeMs: number }> = [];
   for (const logPath of getLaunchLogCandidates(options?.replayDir)) {
     try {
-      const mtimeMs = statSync(logPath).mtimeMs;
+      existing.push({ path: logPath, mtimeMs: statSync(logPath).mtimeMs });
+    } catch {
+      // Candidate does not exist on this machine.
+    }
+  }
+
+  // A stale duplicate install (e.g. a pre-OneDrive-redirect Documents folder) can leave a
+  // second Launch.log behind, so trust the most recently written one.
+  existing.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  for (const candidate of existing) {
+    try {
       if (
         !options?.forceRefresh &&
         cachedFromLog &&
-        cachedFromLog.path === logPath &&
-        cachedFromLog.mtimeMs === mtimeMs
+        cachedFromLog.path === candidate.path &&
+        cachedFromLog.mtimeMs === candidate.mtimeMs
       ) {
         return cachedFromLog.info;
       }
 
-      const content = readFileSync(logPath, "utf8");
-      const parsed = parseLaunchLogVersion(content);
+      const parsed = readLaunchLogVersion(candidate.path);
       if (!parsed) {
         continue;
       }
 
-      cachedFromLog = { info: parsed, mtimeMs, path: logPath };
+      cachedFromLog = { info: parsed, mtimeMs: candidate.mtimeMs, path: candidate.path };
       return parsed;
     } catch {
       // Try the next candidate path.
@@ -138,9 +183,4 @@ export function resolvePsyNetVersion(options?: {
   }
 
   return cachedFromLog?.info ?? fallback;
-}
-
-/** @internal test helper */
-export function parseLaunchLogVersionForTests(content: string): PsyNetVersionInfo | null {
-  return parseLaunchLogVersion(content);
 }

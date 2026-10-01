@@ -13,14 +13,6 @@ export function usesProcessSync(config: AppConfig): boolean {
   return config.syncMode === "process";
 }
 
-export function usesIntervalSync(config: AppConfig): boolean {
-  return config.syncMode === "interval";
-}
-
-export function usesManualSync(config: AppConfig): boolean {
-  return config.syncMode === "manual";
-}
-
 export function getProcessGamesThreshold(config: AppConfig): number {
   if (!usesProcessSync(config) || config.processSyncWhilePlaying !== "after-games") {
     return 0;
@@ -41,8 +33,6 @@ export function isLiveMatchTrackingEnabled(config: AppConfig): boolean {
 
 type LegacySyncFields = {
   syncMode?: SyncMode;
-  skipSyncWhenGameRunning?: boolean;
-  syncOnGameClose?: boolean;
   syncAfterGames?: number;
   processSyncWhilePlaying?: ProcessSyncWhilePlaying;
 };

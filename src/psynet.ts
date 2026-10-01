@@ -1,6 +1,12 @@
 import WebSocket from "ws";
 import { decodeBuildId } from "./buildId.js";
-import { BASE_URL, PING_INTERVAL_MS, PONG_TIMEOUT_MS } from "./constants.js";
+import {
+  BASE_URL,
+  GAME_VERSION,
+  PING_INTERVAL_MS,
+  PONG_TIMEOUT_MS,
+  PSY_BUILD_SECRET,
+} from "./constants.js";
 import { newPlayerId, type PlayerId } from "./playerId.js";
 import { generatePsySig } from "./psySig.js";
 import { resolvePsyNetVersion } from "./psyNetVersion.js";
@@ -14,9 +20,34 @@ import {
 } from "./types.js";
 import { PsyNetRPC } from "./psynetRpc.js";
 
+/**
+ * PsyNet rejects an unusable client build in two ways, both before it looks at the auth
+ * ticket: `VersionMismatch` for a build it knows but considers outdated, and
+ * `BuildNotFound` for a build it will not acknowledge at all.
+ */
+const STALE_BUILD_ERROR_TYPES = new Set(["VersionMismatch", "BuildNotFound"]);
+
+function isStaleBuildError(error: unknown): boolean {
+  return (
+    error instanceof PsyNetRequestError && STALE_BUILD_ERROR_TYPES.has(error.psyError.Type)
+  );
+}
+
+/** True when PsyNet will not open a session for this client build. */
+export function isPsyNetBuildRejected(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("BuildNotFound");
+}
+
+export const LOCAL_REPLAY_FALLBACK_MESSAGE =
+  "Epic login saved. Rocket League is not letting Overtime download replays from its servers. Replays this PC already saved still show in the library.";
+
 export class PsyNet {
   private readonly requestId = new RequestIdCounter();
   private readonly fetchFn: typeof fetch;
+  private readonly replayDir?: string;
+  /** Caller supplied an explicit version — never override it from Launch.log. */
+  private readonly versionPinned: boolean;
   gameVersion: string;
   featureSet: string;
   buildId: string;
@@ -29,6 +60,8 @@ export class PsyNet {
     replayDir?: string;
   }) {
     this.fetchFn = options?.fetchFn ?? fetch;
+    this.replayDir = options?.replayDir;
+    this.versionPinned = Boolean(options?.gameVersion && options?.featureSet);
     const detected = resolvePsyNetVersion({ replayDir: options?.replayDir });
     this.gameVersion = options?.gameVersion ?? detected.gameVersion;
     this.featureSet = options?.featureSet ?? detected.featureSet;
@@ -39,6 +72,30 @@ export class PsyNet {
     this.gameVersion = gameVersion;
     this.featureSet = featureSet;
     this.buildId = String(decodeBuildId(gameVersion));
+  }
+
+  /** Re-read Launch.log, bypassing the cache. Returns true when the version changed. */
+  private refreshVersionFromLaunchLog(): boolean {
+    if (this.versionPinned) {
+      return false;
+    }
+
+    let detected: { gameVersion: string; featureSet: string };
+    try {
+      detected = resolvePsyNetVersion({ replayDir: this.replayDir, forceRefresh: true });
+    } catch {
+      return false;
+    }
+
+    if (
+      detected.gameVersion === this.gameVersion &&
+      detected.featureSet === this.featureSet
+    ) {
+      return false;
+    }
+
+    this.setVersion(detected.gameVersion, detected.featureSet);
+    return true;
   }
 
   async authPlayer(
@@ -140,10 +197,58 @@ export class PsyNet {
   }
 
   private async postJson<T>(path: string[], params: unknown): Promise<T> {
+    try {
+      return await this.sendJson<T>(path, params);
+    } catch (error) {
+      if (!isStaleBuildError(error)) {
+        throw error;
+      }
+
+      // Epic ships new Rocket League builds regularly. The version we just used may predate
+      // the update (cached at startup, or the bundled fallback), so re-read Launch.log and
+      // retry once before giving up.
+      let finalError = error as PsyNetRequestError;
+      if (this.refreshVersionFromLaunchLog()) {
+        try {
+          return await this.sendJson<T>(path, params);
+        } catch (retryError) {
+          if (!isStaleBuildError(retryError)) {
+            throw retryError;
+          }
+          finalError = retryError as PsyNetRequestError;
+        }
+      }
+
+      throw new PsyNetRequestError({
+        Type: finalError.psyError.Type,
+        Message: this.describeStaleBuildError(finalError.psyError.Type),
+      });
+    }
+  }
+
+  /** Secret PsyNet requires on HTTP auth for the bundled game build. */
+  private psyBuildSecret(): string | undefined {
+    return this.gameVersion === GAME_VERSION ? PSY_BUILD_SECRET : undefined;
+  }
+
+  private describeStaleBuildError(type: string): string {
+    if (type === "BuildNotFound") {
+      if (!this.psyBuildSecret()) {
+        return `Rocket League build ${this.gameVersion} is newer than the build Overtime can sign in with (${GAME_VERSION}). Match sync stays unavailable until Overtime is updated for this build.`;
+      }
+
+      return `Rocket League rejected the build secret for ${this.gameVersion} (${this.buildId}). Match sync stays unavailable until Overtime is updated for this build.`;
+    }
+
+    return `Rocket League PsyNet rejected game build ${this.gameVersion} as outdated. Launch Rocket League once so Overtime can read the latest build from Launch.log, then try again.`;
+  }
+
+  private async sendJson<T>(path: string[], params: unknown): Promise<T> {
     const url = `${BASE_URL}/${path.join("/")}`;
     const body = JSON.stringify(params);
 
     const requestId = this.requestId.getId();
+    const buildSecret = this.psyBuildSecret();
     const response = await this.fetchFn(url, {
       method: "POST",
       headers: {
@@ -153,6 +258,7 @@ export class PsyNet {
         PsyEnvironment: "Prod",
         PsyRequestID: requestId,
         PsySig: generatePsySig(body),
+        ...(buildSecret ? { PsyBuildSecret: buildSecret } : {}),
       },
       body,
     });
@@ -168,13 +274,6 @@ export class PsyNet {
     };
 
     if (wrapper.Error) {
-      if (wrapper.Error.Type === "VersionMismatch") {
-        throw new PsyNetRequestError({
-          Type: wrapper.Error.Type,
-          Message:
-            "Rocket League PsyNet rejected this client version. Launch Rocket League once so Overtime can read the latest build from Launch.log, then try again.",
-        });
-      }
       throw new PsyNetRequestError(wrapper.Error);
     }
 

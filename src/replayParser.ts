@@ -286,8 +286,6 @@ function findLocalPlayerForAccount(
 
 function getImportedMatchResult(
   localPlayer: SavedReplayPlayer | undefined,
-  team0Score: number,
-  team1Score: number,
   winningTeam: number,
   forfeited: boolean,
 ): string {
@@ -388,13 +386,7 @@ export function buildImportedReplayRecordFromFile(
     team0Score,
     team1Score,
     secondsPlayed,
-    result: getImportedMatchResult(
-      localPlayer,
-      team0Score,
-      team1Score,
-      winningTeam,
-      forfeited,
-    ),
+    result: getImportedMatchResult(localPlayer, winningTeam, forfeited),
     winningTeam: winningTeam >= 0 ? winningTeam : undefined,
     localPlayerTeam: localPlayer?.team,
     localPlayerId: localPlayer?.playerId,

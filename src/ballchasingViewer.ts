@@ -126,13 +126,6 @@ export async function isInGameReplayAvailable(
   });
 }
 
-/** @deprecated Use {@link isInGameReplayAvailable}. Kept for existing IPC naming. */
-export async function isBallchasingViewerAvailable(
-  options: InGameReplayAvailabilityOptions = {},
-): Promise<boolean> {
-  return isInGameReplayAvailable(options);
-}
-
 export async function playReplayInGame(
   options: PlayReplayInGameOptions,
 ): Promise<string> {

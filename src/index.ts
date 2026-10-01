@@ -1,11 +1,15 @@
-export { EGS, extractAuthCodeFromUrl, getEpicRedirectUrl, isEpicRedirectPage, isValidEpicAuthCode, parseEpicAuthResponse, EPIC_DEVICE_AUTH_CANCELLED } from "./egs.js";
-export { PsyNet, PsyNetRPC, EventType } from "./psynet.js";
+export { EGS, getEpicRedirectUrl, EPIC_DEVICE_AUTH_CANCELLED } from "./egs.js";
+export {
+  PsyNet,
+  PsyNetRPC,
+  EventType,
+  isPsyNetBuildRejected,
+  LOCAL_REPLAY_FALLBACK_MESSAGE,
+} from "./psynet.js";
 export {
   loadAccounts,
-  saveAccounts,
   modifyAccounts,
-  setAccountRefreshToken,
-  invalidateOtherAccountSessions,
+  accessTokenIsValid,
   accountAccessTokenIsValid,
   accountEosRefreshIsValid,
   accountCanAuthenticate,
@@ -16,13 +20,12 @@ export {
   removeAccount,
   updateAccount,
   migrateLegacyRefreshToken,
-  getAccountsPath,
   toPublicAccount,
   toPublicAccounts,
   type LinkedAccount,
   type PublicLinkedAccount,
 } from "./accounts.js";
-export { authenticate, authenticateFromEosToken, completeDeviceAuthorization, getAuthLoginUrl, hasRefreshToken, loginWithAuthCode, loginWithDeviceCode, startDeviceAuthorization, type DeviceAuthorizationRequest } from "./auth.js";
+export { authenticate, authenticateFromEosToken, completeDeviceAuthorization, loginWithAuthCode, startDeviceAuthorization, type DeviceAuthorizationRequest } from "./auth.js";
 export {
   keepAccountTokensAlive,
   refreshAccountTokensIfNeeded,
@@ -42,7 +45,7 @@ export {
   accountHasDeviceAuth,
 } from "./deviceAuthStore.js";
 export type { EpicDeviceAuthCredentials } from "./types.js";
-export { getMatchHistory, getRecentMatches } from "./matches.js";
+export { getMatchHistory } from "./matches.js";
 export {
   uploadReplayToBallchasing,
   validateBallchasingToken,
@@ -59,7 +62,6 @@ export {
 } from "./ballchasing.js";
 export {
   getBallchasingReplayId,
-  isBallchasingViewerAvailable,
   isInGameReplayAvailable,
   isInGameReplaySupported,
   playReplayInGame,
@@ -111,7 +113,6 @@ export {
 export {
   applyUpdateStateToTrackedMatch,
   createLiveTrackedMatch,
-  isTrackedReplayView,
   markTrackedMatchEnded,
   mergeTrackedPlayers,
   trackedMatchToReplayView,
@@ -129,10 +130,7 @@ export {
   checkStatsApiStatus,
   fixStatsApiConfig,
   getTAStatsApiConfigPath,
-  getPreferredStatsApiFixPath,
-  getStatsApiConfigCandidates,
   readStatsApiConfig,
-  STATS_API_DOCS_URL,
   TA_STATS_API_FILE_NAME,
   type StatsApiCheckResult,
   type StatsApiConfigLocation,
@@ -142,8 +140,6 @@ export {
   getProcessGamesThreshold,
   isLiveMatchTrackingEnabled,
   normalizeSyncConfig,
-  usesIntervalSync,
-  usesManualSync,
   usesProcessSync,
   type ProcessSyncWhilePlaying,
   type SyncMode,
@@ -174,7 +170,6 @@ export {
   isOvertimeDeveloperPlayerId,
   isPsyonixBotPlayerId,
   OVERTIME_DEV_STEAM_ID,
-  OVERTIME_DEV_TRACKER_STEAM_ID,
   OVERTIME_DEV_TRACKER_URL,
   OVERTIME_DEV_YOUTUBE_URL,
   parseReplayPlayerPlatform,
@@ -227,7 +222,6 @@ export {
   importReplayFiles,
   importReplayFromBallchasingUrl,
   importReplaysFromBallchasingGroup,
-  accountPresentInReplay,
   type ReplayLibraryRequest,
   type ReplayLibraryResult,
   type BallchasingImportProgress,
@@ -251,12 +245,13 @@ export {
   type PlayerRank,
 } from "./ranks.js";
 export { readReplayName, sanitizeReplayName, setReplayName } from "./replayName.js";
-export { newPlayerId, parsePlayerId, type Platform, type PlayerId } from "./playerId.js";
+export { newPlayerId, type Platform, type PlayerId } from "./playerId.js";
 export { generatePsySig } from "./psySig.js";
 export { decodeBuildId } from "./buildId.js";
 export {
   resolvePsyNetVersion,
   getLaunchLogCandidates,
+  addLaunchLogSearchHint,
   type PsyNetVersionInfo,
 } from "./psyNetVersion.js";
 export {

@@ -1,7 +1,6 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { EpicDeviceAuthCredentials, EosTokenResponse, TokenResponse } from "./types.js";
-import { SESSION_REVOKED_MESSAGE } from "./sessionNotify.js";
 import {
   accountHasDeviceAuth,
   deleteDeviceAuthCredentials,
@@ -73,10 +72,6 @@ type StoredAccount = Omit<
   eosRefreshExpiresAt?: string;
 };
 
-export function getAccountsPath(userDataDir: string): string {
-  return join(userDataDir, "accounts.json");
-}
-
 function getTokensDir(accountsPath: string): string {
   return join(dirname(accountsPath), "tokens");
 }
@@ -111,17 +106,6 @@ async function writeAccountRefreshTokenFile(
   const tokenPath = getTokenPath(accountsPath, accountId);
   await mkdir(dirname(tokenPath), { recursive: true, mode: 0o700 });
   await writeFile(tokenPath, token, { encoding: "utf8", mode: 0o600 });
-}
-
-/** Persist a refresh token immediately — serialized through the accounts write chain. */
-export async function setAccountRefreshToken(
-  accountsPath: string,
-  accountId: string,
-  refreshToken: string,
-): Promise<void> {
-  await modifyAccounts(accountsPath, (accounts) =>
-    updateAccount(accounts, accountId, { refreshToken: refreshToken.trim() }),
-  );
 }
 
 async function loadAccountRefreshToken(
@@ -251,13 +235,21 @@ async function deleteAccountEosRefresh(
   }
 }
 
-export function accountAccessTokenIsValid(account: LinkedAccount, skewMs = 5 * 60_000): boolean {
-  if (!account.accessToken?.trim() || !account.accessTokenExpiresAt?.trim()) {
+export function accessTokenIsValid(
+  accessToken?: string,
+  expiresAt?: string,
+  skewMs = 5 * 60_000,
+): boolean {
+  if (!accessToken?.trim() || !expiresAt?.trim()) {
     return false;
   }
 
-  const expiresAt = Date.parse(account.accessTokenExpiresAt);
-  return Number.isFinite(expiresAt) && expiresAt - skewMs > Date.now();
+  const expiresAtMs = Date.parse(expiresAt);
+  return Number.isFinite(expiresAtMs) && expiresAtMs - skewMs > Date.now();
+}
+
+export function accountAccessTokenIsValid(account: LinkedAccount, skewMs = 5 * 60_000): boolean {
+  return accessTokenIsValid(account.accessToken, account.accessTokenExpiresAt, skewMs);
 }
 
 export function sessionFromAuth(auth: TokenResponse): Pick<
@@ -301,33 +293,6 @@ export function accountCanAuthenticate(account: LinkedAccount): boolean {
     Boolean(account.refreshToken.trim()) ||
     accountEosRefreshIsValid(account) ||
     accountHasDeviceAuth(account)
-  );
-}
-
-/** Epic invalidates earlier refresh tokens when another account signs in on the same client. */
-export async function invalidateOtherAccountSessions(
-  accountsPath: string,
-  keepAccountId: string,
-): Promise<LinkedAccount[]> {
-  return modifyAccounts(accountsPath, (accounts) =>
-    accounts.map((account) => {
-      if (account.accountId === keepAccountId) {
-        return account;
-      }
-
-      const stillUsable =
-        accountAccessTokenIsValid(account) ||
-        accountEosRefreshIsValid(account) ||
-        accountHasDeviceAuth(account);
-
-      return {
-        ...account,
-        refreshToken: "",
-        lastSyncError: stillUsable
-          ? undefined
-          : SESSION_REVOKED_MESSAGE,
-      };
-    }),
   );
 }
 
@@ -486,16 +451,6 @@ export async function modifyAccounts(
 
   await accountsWriteChain;
   return nextAccounts;
-}
-
-/** @deprecated Use modifyAccounts — kept for callers that write full account snapshots intentionally. */
-export async function saveAccounts(
-  accountsPath: string,
-  accounts: LinkedAccount[],
-): Promise<void> {
-  const current = await loadAccounts(accountsPath);
-  await persistAccountTokens(accountsPath, current, accounts);
-  await saveAccountsMetadata(accountsPath, accounts);
 }
 
 export function upsertAccount(

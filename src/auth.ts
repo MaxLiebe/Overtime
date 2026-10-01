@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { accessTokenIsValid } from "./accounts.js";
 import { EGS, EPIC_DEVICE_AUTH_CANCELLED } from "./egs.js";
 import { PsyNet, PsyNetRPC } from "./psynet.js";
 import type { EpicDeviceAuthCredentials, EosTokenResponse, TokenResponse } from "./types.js";
@@ -45,21 +46,6 @@ export interface AuthenticateOptions {
   onDeviceAuthProvisioned?: (deviceAuth: EpicDeviceAuthCredentials) => Promise<void>;
 }
 
-export async function getAuthLoginUrl(options?: { forceLogin?: boolean }): Promise<string> {
-  return new EGS().getAuthUrl(options);
-}
-
-export async function hasRefreshToken(
-  refreshTokenPath = REFRESH_TOKEN_FILE,
-): Promise<boolean> {
-  try {
-    const refreshTokenData = await readFile(refreshTokenPath, "utf8");
-    return refreshTokenData.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
 export async function loginWithAuthCode(
   authCode: string,
   refreshTokenPath?: string,
@@ -70,15 +56,6 @@ export async function loginWithAuthCode(
     await writeFile(refreshTokenPath, auth.refresh_token, "utf8");
   }
   return auth;
-}
-
-function accessTokenIsValid(accessToken?: string, expiresAt?: string, skewMs = 5 * 60_000): boolean {
-  if (!accessToken?.trim() || !expiresAt?.trim()) {
-    return false;
-  }
-
-  const expiresAtMs = Date.parse(expiresAt);
-  return Number.isFinite(expiresAtMs) && expiresAtMs - skewMs > Date.now();
 }
 
 function eosRefreshIsValid(refreshExpiresAt?: string, skewMs = 5 * 60_000): boolean {
@@ -404,17 +381,6 @@ export async function authenticateFromEosToken(
   };
 }
 
-export async function loginWithDeviceCode(): Promise<{
-  eosToken: EosTokenResponse;
-  session: AuthenticatedSession;
-}> {
-  const egs = new EGS();
-  const device = await egs.authenticateWithDevice();
-  const eosToken = await egs.waitForDeviceAuthorization(device);
-  const session = await authenticateFromEosToken(eosToken, "");
-  return { eosToken, session };
-}
-
 export type DeviceAuthorizationRequest = Awaited<
   ReturnType<EGS["startEg1DeviceAuthorization"]>
 >;
@@ -424,10 +390,25 @@ export async function startDeviceAuthorization(): Promise<DeviceAuthorizationReq
   return new EGS().startEg1DeviceAuthorization();
 }
 
+/** Epic login that can be stored before PsyNet accepts the client build. */
+export interface LinkedEpicLogin {
+  displayName: string;
+  accountId: string;
+  refreshToken: string;
+  eosRefreshToken: string;
+  eosRefreshExpiresAt?: string;
+  deviceAuth?: EpicDeviceAuthCredentials;
+}
+
 export async function completeDeviceAuthorization(
   device: DeviceAuthorizationRequest,
   options?: { signal?: AbortSignal },
-): Promise<{ eosToken: EosTokenResponse; session: AuthenticatedSession }> {
+): Promise<{
+  eosToken: EosTokenResponse;
+  session: LinkedEpicLogin;
+  /** Set when Epic login succeeded but Rocket League PsyNet rejected the client. */
+  psyNetError?: string;
+}> {
   const egs = new EGS();
   // Switch client: device_code works. iOS client: can create lasting device_auth.
   const switchAuth = await egs.waitForEg1DeviceAuthorization(device, options);
@@ -444,18 +425,43 @@ export async function completeDeviceAuthorization(
     throw new Error(EPIC_DEVICE_AUTH_CANCELLED);
   }
 
-  const session = await authenticateFromEosToken(
-    eosToken,
-    iosAuth.displayName || switchAuth.displayName,
-    iosAuth.refresh_token,
-  );
-
-  return {
-    eosToken,
-    session: {
-      ...session,
-      deviceAuth,
-      refreshToken: iosAuth.refresh_token?.trim() || session.refreshToken,
-    },
+  const login: LinkedEpicLogin = {
+    accountId: eosToken.account_id,
+    displayName: (iosAuth.displayName || switchAuth.displayName).trim(),
+    refreshToken: iosAuth.refresh_token?.trim() || "",
+    eosRefreshToken: eosToken.refresh_token,
+    eosRefreshExpiresAt: eosToken.refresh_expires_at,
+    deviceAuth,
   };
+
+  // PsyNet is a separate gate from the Epic login. A build rejection must not discard
+  // device_auth: that credential is what lets later syncs retry without another sign-in.
+  try {
+    const session = await authenticateFromEosToken(
+      eosToken,
+      login.displayName,
+      login.refreshToken,
+    );
+    return {
+      eosToken,
+      session: {
+        ...session,
+        deviceAuth,
+        refreshToken: login.refreshToken || session.refreshToken,
+      },
+    };
+  } catch (error) {
+    if (
+      options?.signal?.aborted ||
+      (error instanceof Error && error.message === EPIC_DEVICE_AUTH_CANCELLED)
+    ) {
+      throw new Error(EPIC_DEVICE_AUTH_CANCELLED);
+    }
+
+    return {
+      eosToken,
+      session: login,
+      psyNetError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }

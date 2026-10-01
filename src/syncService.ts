@@ -1,4 +1,5 @@
 import { authenticate, type AuthenticatedSession } from "./auth.js";
+import { isPsyNetBuildRejected, LOCAL_REPLAY_FALLBACK_MESSAGE } from "./psynet.js";
 import {
   accountAccessTokenIsValid,
   accountCanAuthenticate,
@@ -158,6 +159,7 @@ export class SyncService {
 
     const accountMessages: string[] = [];
     const accountErrors: string[] = [];
+    let buildRejectedCount = 0;
 
     try {
       for (const [accountIndex, accountRef] of enabledAccounts.entries()) {
@@ -517,12 +519,23 @@ export class SyncService {
           });
         } catch (error) {
           const message = formatAccountAuthError(error);
-          accountErrors.push(`${account.displayName}: ${message}`);
-          accounts = await modifyAccounts(this.paths.accountsPath, (current) =>
-            updateAccount(current, account.accountId, {
-              lastSyncError: message,
-            }),
-          );
+          if (isPsyNetBuildRejected(error) || isPsyNetBuildRejected(message)) {
+            buildRejectedCount += 1;
+            accountMessages.push(`${account.displayName}: ${LOCAL_REPLAY_FALLBACK_MESSAGE}`);
+            accounts = await modifyAccounts(this.paths.accountsPath, (current) =>
+              updateAccount(current, account.accountId, {
+                lastSyncError: undefined,
+                lastSyncMessage: LOCAL_REPLAY_FALLBACK_MESSAGE,
+              }),
+            );
+          } else {
+            accountErrors.push(`${account.displayName}: ${message}`);
+            accounts = await modifyAccounts(this.paths.accountsPath, (current) =>
+              updateAccount(current, account.accountId, {
+                lastSyncError: message,
+              }),
+            );
+          }
         } finally {
           await session?.rpc.close();
           onUpdate?.(state, accounts);
@@ -591,10 +604,15 @@ export class SyncService {
         summary.push(`${result.failedUploads} upload failures`);
       }
 
+      const onlyBuildRejected =
+        result.accountsSynced === 0 && accountErrors.length === 0 && buildRejectedCount > 0;
+
       state = {
         ...state,
         lastSyncAt: new Date().toISOString(),
-        lastSyncMessage: summary.join(", "),
+        lastSyncMessage: onlyBuildRejected
+          ? LOCAL_REPLAY_FALLBACK_MESSAGE
+          : summary.join(", "),
         lastSyncError:
           result.accountsSynced === 0 && accountErrors.length > 0
             ? accountErrors[0]

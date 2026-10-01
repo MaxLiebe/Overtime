@@ -19,6 +19,9 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import {
+  addLaunchLogSearchHint,
+  isPsyNetBuildRejected,
+  LOCAL_REPLAY_FALLBACK_MESSAGE,
   DEFAULT_CONFIG,
   getDefaultPaths,
   loadAppState,
@@ -64,7 +67,7 @@ import {
   findNewSessionInvalidations,
   SESSION_EXPIRED_MESSAGE,
   getBallchasingReplayId,
-  isBallchasingViewerAvailable,
+  isInGameReplayAvailable,
   isInGameReplaySupported,
   isRocketLeagueRunning,
   RocketLeagueWatcher,
@@ -312,6 +315,7 @@ async function persistConfig(nextConfig: AppConfig): Promise<ReturnType<typeof t
     nextConfig.replaySortBy !== config.replaySortBy;
   config = { ...DEFAULT_CONFIG, ...nextConfig };
   await saveConfig(paths.configPath, config);
+  addLaunchLogSearchHint(config.replayDir);
   if (replayLibraryChanged) {
     invalidateReplayLibraryCache();
   }
@@ -452,7 +456,27 @@ function createTray(): Tray {
       {
         label: "Sync Now",
         click: () => {
-          void runSync();
+          void (async () => {
+            if (await isRocketLeagueRunning()) {
+              const { response } = await dialog.showMessageBox({
+                type: "warning",
+                buttons: ["Cancel", "Sync anyway"],
+                defaultId: 0,
+                cancelId: 0,
+                title: "Rocket League is running",
+                message: "Sync while Rocket League is running?",
+                detail:
+                  "Syncing while Rocket League is running may disconnect you from Rocket League servers.",
+                noLink: true,
+              });
+              if (response !== 1) {
+                return;
+              }
+              await runSync({ allowWhileGameRunning: true });
+              return;
+            }
+            await runSync();
+          })();
         },
       },
       { type: "separator" },
@@ -664,14 +688,14 @@ async function runSync(options?: {
   }
 }
 
-async function addEpicAccount(_forceAccountPicker = true): Promise<LinkedAccount> {
+async function addEpicAccount(): Promise<LinkedAccount> {
   syncPaused = true;
   try {
     while (syncService.isRunning()) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    const { eosToken, session } = await openEpicDeviceLogin(mainWindow, (progress) => {
+    const { eosToken, session, psyNetError } = await openEpicDeviceLogin(mainWindow, (progress) => {
       mainWindow?.webContents.send("epic-device-auth-started", progress);
     });
 
@@ -682,16 +706,30 @@ async function addEpicAccount(_forceAccountPicker = true): Promise<LinkedAccount
     }
 
     pendingFreshEos.set(session.accountId, eosToken);
-    accounts = await modifyAccounts(paths.accountsPath, (current) =>
-      upsertAccountFromEos(current, {
+    accounts = await modifyAccounts(paths.accountsPath, (current) => {
+      const linkedAccounts = upsertAccountFromEos(current, {
         accountId: session.accountId,
         displayName: session.displayName,
         eosRefreshToken: session.eosRefreshToken,
         eosRefreshExpiresAt: session.eosRefreshExpiresAt,
         refreshToken: session.refreshToken,
         deviceAuth: session.deviceAuth,
-      }),
-    );
+      });
+      if (!psyNetError) {
+        return linkedAccounts;
+      }
+
+      if (isPsyNetBuildRejected(psyNetError)) {
+        return updateAccount(linkedAccounts, session.accountId, {
+          lastSyncError: undefined,
+          lastSyncMessage: LOCAL_REPLAY_FALLBACK_MESSAGE,
+        });
+      }
+
+      return updateAccount(linkedAccounts, session.accountId, {
+        lastSyncError: psyNetError,
+      });
+    });
 
     const linked = accounts.find((account) => account.accountId === session.accountId);
     if (!linked) {
@@ -953,7 +991,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("add-epic-account", async () => {
     app.dock?.show();
     try {
-      return toPublicAccount(await addEpicAccount(true));
+      return toPublicAccount(await addEpicAccount());
     } finally {
       if (!mainWindow?.isVisible()) {
         app.dock?.hide();
@@ -961,7 +999,7 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle("login-with-epic", async () => toPublicAccount(await addEpicAccount(true)));
+  ipcMain.handle("login-with-epic", async () => toPublicAccount(await addEpicAccount()));
 
   ipcMain.handle("cancel-epic-device-auth", () => {
     cancelEpicDeviceLogin();
@@ -1470,7 +1508,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("check-ballchasing-viewer", async () => {
     const statsConfig = await readStatsApiConfig(getTAStatsApiConfigPath(config.replayDir));
-    return isBallchasingViewerAvailable({
+    return isInGameReplayAvailable({
       port: statsConfig.port,
       webPort: statsConfig.webPort,
       isStatsApiConnected: () => gameWatcher?.isStatsApiConnected() ?? false,
@@ -1535,6 +1573,7 @@ app.whenReady().then(async () => {
     config = { ...config, replayDir: resolvedReplayDir };
     await saveConfig(paths.configPath, config);
   }
+  addLaunchLogSearchHint(config.replayDir);
 
   const existingState = await loadAppState(paths.statePath);
   accounts = await migrateLegacyRefreshToken({

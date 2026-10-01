@@ -1,8 +1,15 @@
 export const BASE_URL = "https://api.rlpp.psynet.gg/rpc";
 /** Fallback when Launch.log is unavailable — keep roughly current with the live client. */
-export const GAME_VERSION = "260811.1257.524913";
-export const FEATURE_SET = "PrimeUpdate59_1";
+export const GAME_VERSION = "260918.75141.528314";
+export const FEATURE_SET = "PrimeUpdate60";
 export const PSY_SIG_KEY = "c338bd36fb8c42b1a431d30add939fc7";
+/**
+ * HTTP `PsyBuildSecret` for `GAME_VERSION`. PsyNet answers `BuildNotFound` for this
+ * build when the header is missing or stale, before it looks at the auth ticket.
+ * Replace this together with `GAME_VERSION` after each Rocket League update.
+ */
+export const PSY_BUILD_SECRET =
+  "ce31914a39dbf2f3ab13ea54d00b7fe87bc5473a2f04707d78de54039ded8951";
 
 export const PING_INTERVAL_MS = 20_000;
 export const PONG_TIMEOUT_MS = 10_000;

@@ -392,11 +392,3 @@ export function trackedMatchToReplayView(match: TrackedMatch): SavedReplayRecord
   };
 }
 
-export function isTrackedReplayView(
-  replay: SavedReplayRecord,
-): replay is SavedReplayRecord & { trackedStatus: TrackedMatchStatus } {
-  return (
-    "trackedStatus" in replay &&
-    (replay.trackedStatus === "live" || replay.trackedStatus === "awaiting_sync")
-  );
-}

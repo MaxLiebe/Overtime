@@ -58,76 +58,6 @@ export function getEpicRedirectUrl(): string {
   return `https://www.epicgames.com/id/api/redirect?clientId=${EGS_CLIENT_ID}&responseType=code`;
 }
 
-export function extractAuthCodeFromUrl(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-
-    const queryCode = parsed.searchParams.get("code");
-    if (queryCode && isValidEpicAuthCode(queryCode)) {
-      return queryCode;
-    }
-
-    if (parsed.hash.startsWith("#")) {
-      const hashCode = new URLSearchParams(parsed.hash.slice(1)).get("code");
-      if (hashCode && isValidEpicAuthCode(hashCode)) {
-        return hashCode;
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-export function isValidEpicAuthCode(code: string): boolean {
-  return /^[a-f0-9]{32}$/i.test(code);
-}
-
-export interface EpicRedirectResponse {
-  redirectUrl?: string | null;
-  authorizationCode?: string | null;
-  exchangeCode?: string | null;
-  sid?: string | null;
-}
-
-/** Parse Epic's /id/api/redirect JSON response or embedded redirect URL. */
-export function parseEpicAuthResponse(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  if (trimmed.startsWith("{")) {
-    try {
-      const parsed = JSON.parse(trimmed) as EpicRedirectResponse;
-      if (parsed.authorizationCode && isValidEpicAuthCode(parsed.authorizationCode)) {
-        return parsed.authorizationCode;
-      }
-      if (parsed.redirectUrl) {
-        return extractAuthCodeFromUrl(parsed.redirectUrl);
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  return extractAuthCodeFromUrl(trimmed);
-}
-
-export function isEpicRedirectPage(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.hostname.endsWith("epicgames.com") &&
-      parsed.pathname === "/id/api/redirect"
-    );
-  } catch {
-    return false;
-  }
-}
-
 export class EGS {
   private readonly fetchFn: typeof fetch;
 
@@ -407,51 +337,6 @@ export class EGS {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
     });
-  }
-
-  async authenticateWithDevice(): Promise<DeviceAuthResponse> {
-    const response = await this.fetchFn(
-      "https://api.epicgames.dev/epic/oauth/v2/deviceAuthorization",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": EGS_USER_AGENT,
-        },
-        body: new URLSearchParams({ client_id: EOS_CLIENT_ID }),
-      },
-    );
-
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`unexpected status code ${response.status}: ${text}`);
-    }
-
-    return JSON.parse(text) as DeviceAuthResponse;
-  }
-
-  async waitForDeviceAuthorization(
-    device: DeviceAuthResponse,
-    options?: { signal?: AbortSignal },
-  ): Promise<EosTokenResponse> {
-    const attempts = Math.floor(device.expires_in / device.interval);
-
-    for (let i = 0; i < attempts; i++) {
-      if (options?.signal?.aborted) {
-        throw new Error(EPIC_DEVICE_AUTH_CANCELLED);
-      }
-
-      try {
-        return await this.requestEosToken({
-          grant_type: "device_code",
-          device_code: device.device_code,
-        });
-      } catch {
-        await abortableDelay(device.interval * 1000, options?.signal);
-      }
-    }
-
-    throw new Error("device authorization timed out");
   }
 
   private async requestEosToken(

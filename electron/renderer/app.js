@@ -121,6 +121,9 @@ const elements = {
   renameReplayInput: document.getElementById("rename-replay-input"),
   renameReplayCancel: document.getElementById("rename-replay-cancel"),
   renameReplaySubmit: document.getElementById("rename-replay-submit"),
+  syncWhileRunningDialog: document.getElementById("sync-while-running-dialog"),
+  syncWhileRunningCancel: document.getElementById("sync-while-running-cancel"),
+  syncWhileRunningConfirm: document.getElementById("sync-while-running-confirm"),
   deleteReplayDialog: document.getElementById("delete-replay-dialog"),
   deleteReplayMessage: document.getElementById("delete-replay-message"),
   deleteReplayCancel: document.getElementById("delete-replay-cancel"),
@@ -4107,13 +4110,57 @@ elements.accountsList.addEventListener("change", async (event) => {
   updateStatusLine();
 });
 
-elements.syncNow.addEventListener("click", async () => {
-  if (!canSync()) {
-    return;
-  }
+/**
+ * @returns {Promise<boolean>}
+ */
+function confirmSyncWhileRocketLeagueRunning() {
+  return new Promise((resolve) => {
+    const dialog = elements.syncWhileRunningDialog;
+    const cancel = elements.syncWhileRunningCancel;
+    const confirm = elements.syncWhileRunningConfirm;
+    if (!(dialog instanceof HTMLElement) || !(cancel instanceof HTMLButtonElement) || !(confirm instanceof HTMLButtonElement)) {
+      resolve(window.confirm(
+        "Syncing while Rocket League is running may disconnect you from Rocket League servers.\n\nSync anyway?",
+      ));
+      return;
+    }
 
+    const finish = (accepted) => {
+      dialog.classList.add("hidden");
+      dialog.setAttribute("aria-hidden", "true");
+      cancel.removeEventListener("click", onCancel);
+      confirm.removeEventListener("click", onConfirm);
+      dialog.removeEventListener("click", onBackdrop);
+      window.removeEventListener("keydown", onKeyDown);
+      resolve(accepted);
+    };
+
+    const onCancel = () => finish(false);
+    const onConfirm = () => finish(true);
+    const onBackdrop = (event) => {
+      if (event.target === dialog) {
+        finish(false);
+      }
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        finish(false);
+      }
+    };
+
+    dialog.classList.remove("hidden");
+    dialog.setAttribute("aria-hidden", "false");
+    cancel.addEventListener("click", onCancel);
+    confirm.addEventListener("click", onConfirm);
+    dialog.addEventListener("click", onBackdrop);
+    window.addEventListener("keydown", onKeyDown);
+    confirm.focus();
+  });
+}
+
+async function runManualSync(allowWhileGameRunning = false) {
   try {
-    const result = await api.syncNow();
+    const result = await api.syncNow({ allowWhileGameRunning });
     state = result.state;
     accounts = result.accounts;
     await loadReplayLibrary({ page: replayPage });
@@ -4125,6 +4172,23 @@ elements.syncNow.addEventListener("click", async () => {
       updateStatusLine();
     }
   }
+}
+
+elements.syncNow.addEventListener("click", async () => {
+  if (!canSync()) {
+    return;
+  }
+
+  if (isRocketLeagueRunningForStatsApiFix()) {
+    const accepted = await confirmSyncWhileRocketLeagueRunning();
+    if (!accepted) {
+      return;
+    }
+    await runManualSync(true);
+    return;
+  }
+
+  await runManualSync(false);
 });
 
 elements.settingsForm.addEventListener("change", () => {

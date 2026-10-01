@@ -1,11 +1,8 @@
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, join, normalize } from "node:path";
-import { downloadReplayFromBallchasing, listGroupReplayIds, parseBallchasingImportUrl, parseBallchasingReplayUrl } from "./ballchasing.js";
-import {
-  getReplaySortTimestamp,
-  playerMatchesAccount,
-} from "./format.js";
+import { downloadReplayFromBallchasing, listGroupReplayIds, parseBallchasingImportUrl } from "./ballchasing.js";
+import { getReplaySortTimestamp } from "./format.js";
 import {
   buildImportedReplayRecordFromFile,
   readReplayIndexMeta,
@@ -25,6 +22,7 @@ import {
   getReplayLibraryCacheKey,
   setCachedImportedIndex,
   setCachedMergedLibrary,
+  type ImportedReplayIndexEntry,
 } from "./replayLibraryCache.js";
 import { sanitizeReplayDownloadFileName } from "./security.js";
 
@@ -38,13 +36,7 @@ export {
 export const REPLAY_PAGE_SIZE = 50;
 export const IMPORTED_SCAN_CAP = 2000;
 
-export interface ImportedReplayIndexEntry {
-  matchGuid: string;
-  filePath: string;
-  fileName: string;
-  recordStartTimestamp: number;
-  importedAt: string;
-}
+export type { ImportedReplayIndexEntry };
 
 export interface ReplayLibraryRequest {
   replayDir: string;
@@ -751,33 +743,3 @@ async function importReplayFromBallchasingId(
   }
 }
 
-export function accountPresentInReplay(
-  replay: SavedReplayRecord,
-  accounts: LinkedAccount[],
-): boolean {
-  if (replay.source !== "imported") {
-    return true;
-  }
-
-  if (replay.hasAccountMatch === false) {
-    return false;
-  }
-
-  if (replay.accountId) {
-    return accounts.some((account) => account.accountId === replay.accountId);
-  }
-
-  if (replay.players?.length) {
-    return replay.players.some((player) =>
-      accounts.some(
-        (account) =>
-          playerMatchesAccount(player.playerId, account.accountId) ||
-          player.playerName.localeCompare(account.displayName, undefined, {
-            sensitivity: "accent",
-          }) === 0,
-      ),
-    );
-  }
-
-  return Boolean(replay.accountId);
-}

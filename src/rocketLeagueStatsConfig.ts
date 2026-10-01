@@ -7,7 +7,6 @@ import {
 } from "./rocketLeagueStatsApi.js";
 import { getUserTagameConfigDirCandidates } from "./replays.js";
 
-export const STATS_API_DOCS_URL = "https://www.rocketleague.com/en/developer/stats-api";
 export const TA_STATS_API_FILE_NAME = "TAStatsAPI.ini";
 
 const STATS_API_SECTION = "[TAGame.MatchStatsExporter_TA]";
@@ -96,8 +95,8 @@ function upsertStatsApiIni(content: string): string {
   const lines = content.length > 0 ? content.replace(/\r\n/g, "\n").split("\n") : [];
   const sectionIndex = lines.findIndex((line) => line.trim() === STATS_API_SECTION);
   const sectionLines = [
-    "Port=49123",
-    "WebPort=49124",
+    `Port=${DEFAULT_STATS_API_PORT}`,
+    `WebPort=${DEFAULT_STATS_API_WEB_PORT}`,
     `PacketSendRate=${DEFAULT_PACKET_SEND_RATE}`,
   ];
 
@@ -182,14 +181,4 @@ export async function checkStatsApiStatus(
     configPath,
     canAutoFix: true,
   };
-}
-
-/** @deprecated Use getTAStatsApiConfigPath instead. */
-export function getPreferredStatsApiFixPath(replayDir?: string): string {
-  return getTAStatsApiConfigPath(replayDir);
-}
-
-/** @deprecated Use getTAStatsApiConfigPath instead. */
-export function getStatsApiConfigCandidates(replayDir?: string): string[] {
-  return [getTAStatsApiConfigPath(replayDir)];
 }

@@ -13,12 +13,3 @@ export async function getMatchHistory(
 
   return result.Matches ?? [];
 }
-
-export async function getRecentMatches(
-  rpc: PsyNetRPC,
-  limit = 20,
-  signal?: AbortSignal,
-): Promise<MatchEntry[]> {
-  const matches = await getMatchHistory(rpc, signal);
-  return matches.slice(0, limit);
-}

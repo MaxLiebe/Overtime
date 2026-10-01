@@ -9,15 +9,10 @@ import type {
   TrackedMatch,
 } from "rlapi";
 
-export type UpdateStatus =
-  | { state: "idle" }
-  | { state: "checking" }
-  | { state: "available"; version: string }
-  | { state: "not-available"; version: string }
-  | { state: "downloading"; percent: number }
-  | { state: "downloaded"; version: string }
-  | { state: "error"; message: string }
-  | { state: "disabled" };
+// Type-only import: erased at compile time, so electron-updater stays out of the preload bundle.
+import type { UpdateStatus } from "./autoUpdate.js";
+
+export type { UpdateStatus };
 
 export interface ElectronApi {
   getPlatformInfo: () => Promise<{ platform: string; inGameReplaySupported: boolean }>;

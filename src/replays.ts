@@ -1,8 +1,8 @@
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { execSync } from "node:child_process";
 import { homedir, platform } from "node:os";
 import { join, dirname } from "node:path";
 import { resolvePsyNetVersion } from "./psyNetVersion.js";
+import { getWindowsDocumentsCandidates } from "./windowsDocuments.js";
 import { buildReplaySyncFileName, type ReplayFileNameContext } from "./format.js";
 import { uniqueReplayDestination } from "./replayImport.js";
 import {
@@ -57,69 +57,6 @@ export interface SyncReplaysResult {
 
 const RL_DEMOS_SUFFIX = join("My Games", "Rocket League", "TAGame", "Demos");
 const RL_TAGAME_CONFIG_SUFFIX = join("My Games", "Rocket League", "TAGame", "Config");
-
-function expandWindowsEnvVars(value: string): string {
-  return value.replace(/%([^%]+)%/g, (_, name: string) => process.env[name] ?? `%${name}%`);
-}
-
-function readWindowsRegistryDocumentsFolder(): string | undefined {
-  const keys = [
-    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
-    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders",
-  ];
-
-  for (const key of keys) {
-    try {
-      const output = execSync(`reg query "${key}" /v Personal`, {
-        encoding: "utf8",
-        windowsHide: true,
-        timeout: 5000,
-      });
-      const match = output.match(/Personal\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
-      if (match?.[1]) {
-        return expandWindowsEnvVars(match[1].trim());
-      }
-    } catch {
-      // Try the next registry location.
-    }
-  }
-
-  return undefined;
-}
-
-function getWindowsDocumentsFolder(): string | undefined {
-  try {
-    const output = execSync(
-      "powershell -NoProfile -Command \"[Environment]::GetFolderPath('MyDocuments')\"",
-      { encoding: "utf8", windowsHide: true, timeout: 5000 },
-    ).trim();
-    if (output) {
-      return output;
-    }
-  } catch {
-    // Fall back to registry lookup below.
-  }
-
-  return readWindowsRegistryDocumentsFolder();
-}
-
-function getWindowsDocumentsCandidates(): string[] {
-  const home = homedir();
-  const candidates = [
-    getWindowsDocumentsFolder(),
-    process.env.OneDrive ? join(process.env.OneDrive, "Documents") : undefined,
-    process.env.OneDrive ? join(process.env.OneDrive, "Documenten") : undefined,
-    process.env.OneDriveCommercial
-      ? join(process.env.OneDriveCommercial, "Documents")
-      : undefined,
-    process.env.OneDriveCommercial
-      ? join(process.env.OneDriveCommercial, "Documenten")
-      : undefined,
-    join(home, "Documents"),
-  ].filter((value): value is string => Boolean(value));
-
-  return [...new Set(candidates)];
-}
 
 function getWindowsReplayDirCandidates(): string[] {
   return getWindowsDocumentsCandidates().map((documents) => join(documents, RL_DEMOS_SUFFIX));
@@ -365,14 +302,6 @@ export async function replayFileExists(
       return false;
     }
   }
-}
-
-export async function isReplayDownloaded(
-  matchGuid: string,
-  replayDir: string,
-  match: Match,
-): Promise<boolean> {
-  return replayFileExists(replayDir, match);
 }
 
 export async function downloadReplay(
