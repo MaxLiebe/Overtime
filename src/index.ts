@@ -25,7 +25,16 @@ export {
   type LinkedAccount,
   type PublicLinkedAccount,
 } from "./accounts.js";
-export { authenticate, authenticateFromEosToken, completeDeviceAuthorization, loginWithAuthCode, startDeviceAuthorization, type DeviceAuthorizationRequest } from "./auth.js";
+export {
+  authenticate,
+  authenticateFromEosToken,
+  completeDeviceAuthorization,
+  EpicSessionExpiredError,
+  EpicUnavailableError,
+  loginWithAuthCode,
+  startDeviceAuthorization,
+  type DeviceAuthorizationRequest,
+} from "./auth.js";
 export {
   keepAccountTokensAlive,
   refreshAccountTokensIfNeeded,
@@ -259,6 +268,16 @@ export {
   FEATURE_SET,
   BASE_URL,
 } from "./constants.js";
+export {
+  BUNDLED_PSYNET_BUILDS,
+  REMOTE_PSYNET_BUILDS_URL,
+  configurePsyNetBuildCache,
+  getKnownPsyNetBuilds,
+  refreshPsyNetBuilds,
+  type PsyNetBuild,
+} from "./psyNetBuilds.js";
+export { EpicAuthError, type EpicErrorKind } from "./epicErrors.js";
+export { NetworkError } from "./http.js";
 export type {
   AuthPlayerRequest,
   AuthPlayerResponse,

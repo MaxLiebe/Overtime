@@ -1,4 +1,5 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink } from "node:fs/promises";
+import { writeFileAtomic } from "./atomicFile.js";
 import { dirname, join } from "node:path";
 import type { EpicDeviceAuthCredentials, EosTokenResponse, TokenResponse } from "./types.js";
 import {
@@ -105,7 +106,7 @@ async function writeAccountRefreshTokenFile(
 
   const tokenPath = getTokenPath(accountsPath, accountId);
   await mkdir(dirname(tokenPath), { recursive: true, mode: 0o700 });
-  await writeFile(tokenPath, token, { encoding: "utf8", mode: 0o600 });
+  await writeFileAtomic(tokenPath, token, { encoding: "utf8", mode: 0o600 });
 }
 
 async function loadAccountRefreshToken(
@@ -162,7 +163,7 @@ async function writeAccountSessionFile(
 ): Promise<void> {
   const sessionPath = getSessionPath(accountsPath, accountId);
   await mkdir(dirname(sessionPath), { recursive: true, mode: 0o700 });
-  await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`, {
+  await writeFileAtomic(sessionPath, `${JSON.stringify(session, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -210,7 +211,7 @@ async function writeAccountEosRefreshFile(
 
   const eosPath = getEosTokenPath(accountsPath, accountId);
   await mkdir(dirname(eosPath), { recursive: true, mode: 0o700 });
-  await writeFile(
+  await writeFileAtomic(
     eosPath,
     `${JSON.stringify(
       {
@@ -353,7 +354,7 @@ async function saveAccountsMetadata(
     }) => account,
   );
   await mkdir(dirname(accountsPath), { recursive: true });
-  await writeFile(accountsPath, `${JSON.stringify(metadata, null, 2)}\n`, {
+  await writeFileAtomic(accountsPath, `${JSON.stringify(metadata, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });

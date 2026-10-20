@@ -20,6 +20,8 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import {
   addLaunchLogSearchHint,
+  configurePsyNetBuildCache,
+  refreshPsyNetBuilds,
   isPsyNetBuildRejected,
   LOCAL_REPLAY_FALLBACK_MESSAGE,
   DEFAULT_CONFIG,
@@ -1567,6 +1569,9 @@ app.whenReady().then(async () => {
   app.setName("Overtime");
 
   paths = getDefaultPaths(app.getPath("userData"));
+  configurePsyNetBuildCache(join(app.getPath("userData"), "psynet-builds.json"));
+  // Pick up a newly published build secret early; the first sync waits on this anyway.
+  void refreshPsyNetBuilds();
   config = await loadConfig(paths.configPath);
   const resolvedReplayDir = await resolveReplayDir(config.replayDir);
   if (resolvedReplayDir !== config.replayDir) {

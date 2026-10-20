@@ -1,14 +1,18 @@
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { writeFileAtomic } from "./atomicFile.js";
+import { fetchWithTimeout, isTransientStatus, NetworkError, withRetries } from "./http.js";
 import { homedir, platform } from "node:os";
 import { join, dirname } from "node:path";
 import { resolvePsyNetVersion } from "./psyNetVersion.js";
 import { getWindowsDocumentsCandidates } from "./windowsDocuments.js";
-import { buildReplaySyncFileName, type ReplayFileNameContext } from "./format.js";
-import { uniqueReplayDestination } from "./replayImport.js";
+// Keep protonReplayDir ahead of replayImport: replayImport -> store -> replays is a cycle,
+// and store calls getDefaultReplayDir() while loading, which needs protonReplayDir ready.
 import {
   getDefaultProtonReplayDirSync,
   getProtonReplayDirCandidatesSync,
 } from "./protonReplayDir.js";
+import { buildReplaySyncFileName, type ReplayFileNameContext } from "./format.js";
+import { uniqueReplayDestination } from "./replayImport.js";
 import type { Match, MatchEntry } from "./types.js";
 
 const DEFAULT_STATE_FILE = ".replay-saver-state.json";
@@ -304,6 +308,19 @@ export async function replayFileExists(
   }
 }
 
+/** Covers the whole transfer; replays are a few MB, so this only trips on a stalled link. */
+const REPLAY_DOWNLOAD_TIMEOUT_MS = 3 * 60_000;
+
+class ReplayDownloadError extends Error {
+  constructor(
+    readonly status: number,
+    statusText: string,
+  ) {
+    super(`download failed with status ${status} ${statusText}`.trim());
+    this.name = "ReplayDownloadError";
+  }
+}
+
 export async function downloadReplay(
   entry: MatchEntry,
   replayDir: string,
@@ -320,15 +337,25 @@ export async function downloadReplay(
   const fileName = getReplayFileName(entry.Match, context);
   const destination = await uniqueReplayDestination(replayDir, fileName);
   const { gameVersion } = resolvePsyNetVersion({ replayDir });
-  const response = await fetchFn(entry.ReplayUrl, {
-    headers: {
-      "User-Agent": `RL Win/${gameVersion} gzip`,
+  const replayUrl = entry.ReplayUrl;
+  const response = await withRetries(
+    async () => {
+      const attempt = await fetchWithTimeout(
+        fetchFn,
+        replayUrl,
+        { headers: { "User-Agent": `RL Win/${gameVersion} gzip` } },
+        REPLAY_DOWNLOAD_TIMEOUT_MS,
+      );
+      if (!attempt.ok) {
+        throw new ReplayDownloadError(attempt.status, attempt.statusText);
+      }
+      return attempt;
     },
-  });
-
-  if (!response.ok) {
-    throw new Error(`download failed with status ${response.status} ${response.statusText}`);
-  }
+    (error) =>
+      error instanceof NetworkError ||
+      (error instanceof ReplayDownloadError && isTransientStatus(error.status)),
+    [2_000],
+  );
 
   const contentLength = response.headers.get("content-length");
   const bytesTotal = contentLength ? Number.parseInt(contentLength, 10) : undefined;
@@ -362,7 +389,9 @@ export async function downloadReplay(
     throw new Error("downloaded replay file is empty");
   }
 
-  await writeFile(destination, replayData);
+  // Write through a temporary file: a half-written .replay would carry the match GUID in
+  // its name, count as "already saved" on every later sync, and never be fixed.
+  await writeFileAtomic(destination, replayData);
   return destination;
 }
 
@@ -383,11 +412,9 @@ export async function syncReplays(
     downloadedGuids = [];
   }
 
+  const guidsOnDisk = await scanExistingReplayGuids(replayDir);
   const knownGuids = new Set(
-    [
-      ...downloadedGuids,
-      ...(await scanExistingReplayGuids(replayDir)),
-    ].map((guid) => guid.toUpperCase()),
+    [...downloadedGuids, ...guidsOnDisk].map((guid) => guid.toUpperCase()),
   );
   const skipDownloadGuids = new Set(
     [...(options.skipDownloadGuids ?? [])].map((guid) => guid.toUpperCase()),
@@ -421,8 +448,10 @@ export async function syncReplays(
       continue;
     }
 
-    const alreadyDownloaded = await replayFileExists(replayDir, entry.Match, fileNameContext);
-    if (alreadyDownloaded) {
+    // Decide by match GUID, never by file name. Names are not unique (two matches with the
+    // same score, map and length collide) and can change between syncs (once the player's
+    // platform ID is learned), and a replay the user deleted must not come back.
+    if (knownGuids.has(matchGuid.toUpperCase())) {
       result.skippedExisting += 1;
       knownGuids.add(matchGuid.toUpperCase());
       continue;

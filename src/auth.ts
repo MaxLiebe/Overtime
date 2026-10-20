@@ -1,16 +1,11 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
+import { writeFile } from "node:fs/promises";
 import { accessTokenIsValid } from "./accounts.js";
 import { EGS, EPIC_DEVICE_AUTH_CANCELLED } from "./egs.js";
+import { EpicAuthError, epicErrorKind } from "./epicErrors.js";
 import { PsyNet, PsyNetRPC } from "./psynet.js";
 import type { EpicDeviceAuthCredentials, EosTokenResponse, TokenResponse } from "./types.js";
-import {
-  authenticateWithStoredDeviceAuth,
-  tryProvisionDeviceAuthFromAccessToken,
-} from "./deviceAuth.js";
-
-const REFRESH_TOKEN_FILE = ".rlshops";
+import { tryProvisionDeviceAuthFromAccessToken } from "./deviceAuth.js";
+import { SESSION_EXPIRED_MESSAGE } from "./sessionNotify.js";
 
 export interface AuthenticatedSession {
   rpc: PsyNetRPC;
@@ -33,17 +28,33 @@ export interface AuthenticateOptions {
   accountId?: string;
   /** Use tokens straight from an auth-code login — avoids a redundant refresh that can break exchange. */
   tokenResponse?: TokenResponse;
-  /** Fresh EOS token from device-code login — skip launcher auth entirely. */
+  /** Fresh EOS token from device-code login — skip Epic sign-in entirely. */
   eosTokenResponse?: EosTokenResponse;
-  refreshTokenPath?: string;
-  authCode?: string;
-  onAuthCodeNeeded?: () => Promise<string>;
-  /** Called with rotated tokens immediately after refresh, before exchange. */
+  /** Called with rotated EG1 tokens as soon as Epic issues them. */
   onTokenRefreshed?: (auth: TokenResponse) => Promise<void>;
-  /** Called when EOS refresh succeeds — persists per-account EOS credentials. */
+  /** Called whenever a new EOS token is issued — persists per-account EOS credentials. */
   onEosTokenRefreshed?: (eos: EosTokenResponse) => Promise<void>;
-  /** Called when long-lived device_auth credentials are created or reused. */
+  /** Called when long-lived device_auth credentials are created. */
   onDeviceAuthProvisioned?: (deviceAuth: EpicDeviceAuthCredentials) => Promise<void>;
+}
+
+/** Epic could not be reached (or was down) for every sign-in route that was tried. */
+export class EpicUnavailableError extends Error {
+  constructor(detail: string) {
+    super(`Couldn't reach Epic Games to sign in (${detail}). Overtime will try again on the next sync.`);
+    this.name = "EpicUnavailableError";
+  }
+}
+
+/** Epic rejected every saved credential for the account: the user has to sign in again. */
+export class EpicSessionExpiredError extends Error {
+  readonly detail: string;
+
+  constructor(detail: string) {
+    super(SESSION_EXPIRED_MESSAGE);
+    this.name = "EpicSessionExpiredError";
+    this.detail = detail;
+  }
 }
 
 export async function loginWithAuthCode(
@@ -67,295 +78,189 @@ function eosRefreshIsValid(refreshExpiresAt?: string, skewMs = 5 * 60_000): bool
   return Number.isFinite(expiresAtMs) && expiresAtMs - skewMs > Date.now();
 }
 
-function sessionFromEosTokenResponse(
-  eosToken: EosTokenResponse,
-  displayName: string,
-  refreshTokenFallback = "",
-): AuthenticatedSession {
-  return {
-    rpc: undefined as unknown as PsyNetRPC,
-    displayName,
-    accountId: eosToken.account_id,
-    refreshToken: refreshTokenFallback,
-    eosRefreshToken: eosToken.refresh_token,
-    eosRefreshExpiresAt: eosToken.refresh_expires_at,
-  };
+/** Result of the Epic half of sign-in, before Rocket League's servers are involved. */
+interface EpicLogin {
+  eos: EosTokenResponse;
+  displayName: string;
+  /** EG1 refresh token to keep, when this route produced one. */
+  refreshToken?: string;
+  /** EG1 access token, which (unlike an EOS token) can create device_auth credentials. */
+  eg1AccessToken?: string;
 }
 
-export async function connectEpicSession(
-  auth: TokenResponse,
-  refreshTokenFallback?: string,
-  options?: {
-    allowRefreshFallback?: boolean;
-    onEosTokenRefreshed?: (eos: EosTokenResponse) => Promise<void>;
-  },
-): Promise<AuthenticatedSession> {
-  const egs = new EGS();
-
-  let exchangeCode: string;
-  try {
-    exchangeCode = await egs.getExchangeCode(auth.access_token);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Epic exchange failed: ${message}`);
-  }
-
-  let eosToken: EosTokenResponse;
-  try {
-    eosToken = await egs.exchangeEosToken(exchangeCode);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Epic EOS token failed: ${message}`);
-  }
-
-  await options?.onEosTokenRefreshed?.(eosToken);
-
-  const psyNet = new PsyNet();
-  const { rpc, verifiedPlayerName } = await psyNet.authPlayer(
-    eosToken.access_token,
-    eosToken.account_id,
-    auth.displayName,
-  );
-
-  await waitForConnection(rpc);
-
-  const displayName = auth.displayName.trim() || verifiedPlayerName;
-
-  return {
-    rpc,
-    displayName,
-    accountId: eosToken.account_id,
-    refreshToken:
-      auth.refresh_token?.trim() ||
-      (options?.allowRefreshFallback !== false ? refreshTokenFallback?.trim() : "") ||
-      "",
-    eosRefreshToken: eosToken.refresh_token,
-    eosRefreshExpiresAt: eosToken.refresh_expires_at,
-  };
+interface SignInRoute {
+  name: string;
+  run: () => Promise<EpicLogin>;
 }
 
-async function authenticateViaEosRefresh(
-  options: AuthenticateOptions,
-): Promise<AuthenticatedSession | null> {
-  if (!options.eosRefreshToken?.trim() || !options.displayName?.trim()) {
-    return null;
-  }
-
-  if (!eosRefreshIsValid(options.eosRefreshExpiresAt)) {
-    return null;
-  }
-
-  const egs = new EGS();
-  try {
-    const eosToken = await egs.refreshEosToken(options.eosRefreshToken.trim());
-    await options.onEosTokenRefreshed?.(eosToken);
-    const session = await authenticateFromEosToken(
-      eosToken,
-      options.displayName,
-      options.refreshToken ?? "",
-    );
-    const deviceAuth =
-      options.deviceAuth ??
-      (await tryProvisionDeviceAuthFromAccessToken(eosToken.access_token));
-    if (deviceAuth) {
-      await options.onDeviceAuthProvisioned?.(deviceAuth);
-      return { ...session, deviceAuth };
-    }
-    return session;
-  } catch {
-    return null;
-  }
+async function eosFromEg1(egs: EGS, auth: TokenResponse): Promise<EosTokenResponse> {
+  const exchangeCode = await egs.getExchangeCode(auth.access_token);
+  return egs.exchangeEosToken(exchangeCode);
 }
 
-async function authenticateViaDeviceAuth(
-  options: AuthenticateOptions,
-): Promise<AuthenticatedSession | null> {
-  if (!options.deviceAuth?.accountId?.trim() || !options.deviceAuth.deviceId?.trim()) {
-    return null;
-  }
-
-  try {
-    const { auth, eos } = await authenticateWithStoredDeviceAuth(options.deviceAuth);
-    await options.onTokenRefreshed?.(auth);
-    await options.onDeviceAuthProvisioned?.(options.deviceAuth);
-    if (eos) {
-      await options.onEosTokenRefreshed?.(eos);
-      const session = await authenticateFromEosToken(
-        eos,
-        options.displayName ?? auth.displayName,
-        auth.refresh_token,
-      );
-      return { ...session, deviceAuth: options.deviceAuth };
-    }
-
-    const session = await connectEpicSession(auth, auth.refresh_token, {
-      onEosTokenRefreshed: options.onEosTokenRefreshed,
-    });
-    return { ...session, deviceAuth: options.deviceAuth };
-  } catch {
-    return null;
-  }
-}
-
-export async function authenticate(
-  options: AuthenticateOptions = {},
-): Promise<AuthenticatedSession> {
-  const usePerAccountToken = Boolean(
-    options.refreshToken?.trim() ||
-      options.tokenResponse ||
-      options.accessToken?.trim() ||
-      options.eosRefreshToken?.trim() ||
-      options.deviceAuth,
-  );
-  const refreshTokenPath =
-    options.refreshTokenPath !== undefined
-      ? options.refreshTokenPath || null
-      : usePerAccountToken
-        ? null
-        : REFRESH_TOKEN_FILE;
-  const egs = new EGS();
-
-  let auth: TokenResponse;
+/**
+ * Every way the saved credentials can produce an EOS token, most reliable first. Each
+ * route is independent, so one dead token (a rotated refresh token, an access token Epic
+ * revoked early) falls through to the next instead of failing the sync.
+ */
+function signInRoutes(egs: EGS, options: AuthenticateOptions): SignInRoute[] {
+  const routes: SignInRoute[] = [];
+  const name = options.displayName?.trim() ?? "";
 
   if (options.eosTokenResponse) {
-    await options.onEosTokenRefreshed?.(options.eosTokenResponse);
-    const session = await authenticateFromEosToken(
-      options.eosTokenResponse,
-      options.displayName ?? "",
-      options.refreshToken ?? "",
-    );
-    const deviceAuth =
-      options.deviceAuth ??
-      (await tryProvisionDeviceAuthFromAccessToken(options.eosTokenResponse.access_token));
-    if (deviceAuth) {
-      await options.onDeviceAuthProvisioned?.(deviceAuth);
-      return { ...session, deviceAuth };
-    }
-    return session;
+    const eos = options.eosTokenResponse;
+    routes.push({ name: "new login", run: async () => ({ eos, displayName: name }) });
   }
 
   if (options.tokenResponse) {
-    auth = options.tokenResponse;
-  } else if (
-    accessTokenIsValid(options.accessToken, options.accessTokenExpiresAt) &&
-    options.displayName &&
-    options.accountId
-  ) {
-    auth = {
-      access_token: options.accessToken!.trim(),
-      refresh_token: options.refreshToken ?? "",
-      expires_in: 0,
-      expires_at: options.accessTokenExpiresAt!,
-      token_type: "bearer",
-      client_id: "",
-      internal_client: false,
-      client_service: "",
-      account_id: options.accountId,
-      displayName: options.displayName,
-      app: "",
-      in_app_id: "",
-      device_id: "",
-    };
-  } else {
-    const deviceSession = await authenticateViaDeviceAuth(options);
-    if (deviceSession) {
-      return deviceSession;
-    }
-
-    const eosSession = await authenticateViaEosRefresh(options);
-    if (eosSession) {
-      return eosSession;
-    }
-
-    if (options.authCode) {
-      auth = await loginWithAuthCode(options.authCode, refreshTokenPath ?? undefined);
-    } else if (options.refreshToken?.trim()) {
-      auth = await egs.authenticateWithRefreshToken(options.refreshToken.trim());
-      await options.onTokenRefreshed?.(auth);
-    } else {
-      try {
-        if (!refreshTokenPath) {
-          throw new Error("No Epic account linked. Add an account in settings first.");
-        }
-
-        const refreshTokenData = await readFile(refreshTokenPath, "utf8");
-        const refreshToken = refreshTokenData.trim();
-        if (refreshToken) {
-          auth = await egs.authenticateWithRefreshToken(refreshToken);
-        } else if (options.onAuthCodeNeeded) {
-          const authCode = await options.onAuthCodeNeeded();
-          auth = await loginWithAuthCode(authCode, refreshTokenPath);
-        } else {
-          auth = await authenticateWithCode(egs, refreshTokenPath);
-        }
-      } catch {
-        if (options.onAuthCodeNeeded) {
-          const authCode = await options.onAuthCodeNeeded();
-          auth = await loginWithAuthCode(authCode, refreshTokenPath ?? undefined);
-        } else {
-          throw new Error("No Epic account linked. Add an account in settings first.");
-        }
-      }
-    }
+    const auth = options.tokenResponse;
+    routes.push({
+      name: "new login",
+      run: async () => ({
+        eos: await eosFromEg1(egs, auth),
+        displayName: name || auth.displayName,
+        refreshToken: auth.refresh_token,
+        eg1AccessToken: auth.access_token,
+      }),
+    });
   }
 
-  if (!options.tokenResponse && !options.refreshToken?.trim() && refreshTokenPath) {
-    await writeFile(refreshTokenPath, auth.refresh_token, "utf8");
+  if (accessTokenIsValid(options.accessToken, options.accessTokenExpiresAt)) {
+    const accessToken = options.accessToken!.trim();
+    routes.push({
+      name: "saved session",
+      run: async () => {
+        const exchangeCode = await egs.getExchangeCode(accessToken);
+        return {
+          eos: await egs.exchangeEosToken(exchangeCode),
+          displayName: name,
+          eg1AccessToken: accessToken,
+        };
+      },
+    });
   }
 
-  const usedRefreshGrant =
-    Boolean(options.refreshToken?.trim()) &&
-    !options.tokenResponse &&
-    !accessTokenIsValid(options.accessToken, options.accessTokenExpiresAt);
-
-  const session = await connectEpicSession(auth, options.refreshToken ?? auth.refresh_token, {
-    allowRefreshFallback: !usedRefreshGrant,
-    onEosTokenRefreshed: options.onEosTokenRefreshed,
-  });
-
-  const deviceAuth =
-    options.deviceAuth ?? (await tryProvisionDeviceAuthFromAccessToken(auth.access_token));
-  if (deviceAuth) {
-    await options.onDeviceAuthProvisioned?.(deviceAuth);
-    return { ...session, deviceAuth };
+  const deviceAuth = options.deviceAuth;
+  if (deviceAuth?.accountId?.trim() && deviceAuth.deviceId?.trim() && deviceAuth.secret?.trim()) {
+    routes.push({
+      name: "lasting login",
+      run: async () => {
+        const auth = await egs.authenticateWithDeviceAuth(deviceAuth);
+        await options.onTokenRefreshed?.(auth);
+        return {
+          eos: await eosFromEg1(egs, auth),
+          displayName: name || auth.displayName,
+          refreshToken: auth.refresh_token,
+          eg1AccessToken: auth.access_token,
+        };
+      },
+    });
   }
 
-  return session;
+  const eosRefreshToken = options.eosRefreshToken?.trim();
+  if (eosRefreshToken && eosRefreshIsValid(options.eosRefreshExpiresAt)) {
+    routes.push({
+      name: "Epic Online Services refresh",
+      run: async () => ({
+        eos: await egs.refreshEosToken(eosRefreshToken),
+        displayName: name,
+      }),
+    });
+  }
+
+  const refreshToken = options.refreshToken?.trim();
+  if (refreshToken) {
+    routes.push({
+      name: "refresh token",
+      run: async () => {
+        const auth = await egs.refreshWithAnyClient(refreshToken);
+        await options.onTokenRefreshed?.(auth);
+        return {
+          eos: await eosFromEg1(egs, auth),
+          displayName: name || auth.displayName,
+          refreshToken: auth.refresh_token,
+          eg1AccessToken: auth.access_token,
+        };
+      },
+    });
+  }
+
+  return routes;
 }
 
-async function authenticateWithCode(
-  egs: EGS,
-  refreshTokenPath: string,
-): Promise<TokenResponse> {
-  console.log("Open this URL in your browser to authenticate:");
-  console.log(egs.getAuthUrl());
-  console.log();
-
-  const rl = createInterface({ input, output });
-  const authCode = (await rl.question("Auth code: ")).trim();
-  rl.close();
-
-  return loginWithAuthCode(authCode, refreshTokenPath);
-}
-
-async function waitForConnection(rpc: PsyNetRPC, timeoutMs = 15_000): Promise<void> {
-  if (rpc.isConnected()) {
-    return;
+/**
+ * Get an EOS token for the account, trying each saved credential in turn. Throws
+ * `EpicUnavailableError` when Epic could not be reached for some route (so the saved login
+ * may still be fine), and `EpicSessionExpiredError` only when Epic rejected all of them.
+ */
+async function signInToEpic(options: AuthenticateOptions): Promise<EpicLogin> {
+  const egs = new EGS();
+  const routes = signInRoutes(egs, options);
+  if (routes.length === 0) {
+    throw new EpicSessionExpiredError("no saved Epic credentials");
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error("timed out waiting for websocket connection"));
-    }, timeoutMs);
-
-    const interval = setInterval(() => {
-      if (rpc.isConnected()) {
-        clearTimeout(timeout);
-        clearInterval(interval);
-        resolve();
+  const failures: Array<{ route: string; error: unknown }> = [];
+  for (const route of routes) {
+    try {
+      const login = await route.run();
+      await options.onEosTokenRefreshed?.(login.eos);
+      return login;
+    } catch (error) {
+      if (error instanceof Error && error.message === EPIC_DEVICE_AUTH_CANCELLED) {
+        throw error;
       }
-    }, 50);
-  });
+      failures.push({ route: route.name, error });
+    }
+  }
+
+  const describe = ({ route, error }: { route: string; error: unknown }) =>
+    `${route}: ${error instanceof Error ? error.message : String(error)}`;
+
+  const transient = failures.find(({ error }) => epicErrorKind(error) === "transient");
+  if (transient) {
+    throw new EpicUnavailableError(describe(transient));
+  }
+
+  const unexpected = failures.find(({ error }) => epicErrorKind(error) === "other");
+  if (unexpected && !failures.some(({ error }) => epicErrorKind(error) === "credentials")) {
+    // Nothing said the login is dead; report what went wrong instead of asking to re-add.
+    throw new EpicAuthError(`Epic sign-in failed (${describe(unexpected)})`, "other");
+  }
+
+  throw new EpicSessionExpiredError(failures.map(describe).join("; "));
+}
+
+/**
+ * Sign in to Epic and then to Rocket League's servers.
+ *
+ * The two halves fail for different reasons and are reported separately: an Epic failure
+ * means the saved login needs attention (or Epic is unreachable), while a PsyNet failure
+ * (for example `BuildNotFound` after a game patch) says nothing about the login and must
+ * not be reported as an expired session.
+ */
+export async function authenticate(
+  options: AuthenticateOptions = {},
+): Promise<AuthenticatedSession> {
+  const login = await signInToEpic(options);
+
+  // Create lasting credentials before contacting PsyNet, so a server-side rejection there
+  // does not cost the user their saved login.
+  let deviceAuth = options.deviceAuth;
+  if (!deviceAuth && login.eg1AccessToken) {
+    const provisioned = await tryProvisionDeviceAuthFromAccessToken(login.eg1AccessToken);
+    if (provisioned) {
+      deviceAuth = provisioned;
+      await options.onDeviceAuthProvisioned?.(provisioned);
+    }
+  }
+
+  const session = await authenticateFromEosToken(
+    login.eos,
+    login.displayName || options.displayName || "",
+    login.refreshToken?.trim() || options.refreshToken || "",
+  );
+  return deviceAuth ? { ...session, deviceAuth } : session;
 }
 
 export async function authenticateFromEosToken(
@@ -370,14 +275,17 @@ export async function authenticateFromEosToken(
     displayName,
   );
 
-  await waitForConnection(rpc);
+  await rpc.waitForOpen();
 
   const resolvedName = displayName.trim() || verifiedPlayerName;
 
   return {
-    ...sessionFromEosTokenResponse(eosToken, resolvedName, refreshTokenFallback),
     rpc,
     displayName: resolvedName,
+    accountId: eosToken.account_id,
+    refreshToken: refreshTokenFallback,
+    eosRefreshToken: eosToken.refresh_token,
+    eosRefreshExpiresAt: eosToken.refresh_expires_at,
   };
 }
 
@@ -434,7 +342,7 @@ export async function completeDeviceAuthorization(
     deviceAuth,
   };
 
-  // PsyNet is a separate gate from the Epic login. A build rejection must not discard
+  // PsyNet is a separate gate from the Epic login. A rejection there must not discard
   // device_auth: that credential is what lets later syncs retry without another sign-in.
   try {
     const session = await authenticateFromEosToken(
@@ -442,12 +350,13 @@ export async function completeDeviceAuthorization(
       login.displayName,
       login.refreshToken,
     );
+    // The first sync opens its own connection with this EOS token.
+    await session.rpc.close();
     return {
       eosToken,
       session: {
-        ...session,
-        deviceAuth,
-        refreshToken: login.refreshToken || session.refreshToken,
+        ...login,
+        displayName: session.displayName || login.displayName,
       },
     };
   } catch (error) {

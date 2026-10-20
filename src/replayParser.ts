@@ -13,9 +13,21 @@ import { isProPlayer } from "./proPlayers.js";
 import type { SavedReplayPlayer, SavedReplayRecord } from "./store.js";
 
 const require = createRequire(import.meta.url);
-const { readFileHeader } = require("@kant/node-boxcars") as {
-  readFileHeader: (filename: string) => Uint8Array;
-};
+
+type ReadFileHeader = (filename: string) => Uint8Array;
+let readFileHeaderImpl: ReadFileHeader | null = null;
+
+/**
+ * Load the native replay parser on first use. node-boxcars only ships a Windows binary,
+ * so loading it eagerly made every module that touches the library (sync included) crash
+ * at startup on other platforms; now only header parsing fails there, and callers already
+ * treat a failed parse as "unknown".
+ */
+function readFileHeader(filename: string): Uint8Array {
+  readFileHeaderImpl ??= (require("@kant/node-boxcars") as { readFileHeader: ReadFileHeader })
+    .readFileHeader;
+  return readFileHeaderImpl(filename);
+}
 
 const decoder = new CborDecoder();
 
