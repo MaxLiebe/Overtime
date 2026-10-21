@@ -1,4 +1,5 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { writeFileAtomic } from "./atomicFile.js";
 import { dirname, join, normalize } from "node:path";
 import { getDefaultReplayDir } from "./replays.js";
 import type { BallchasingVisibility } from "./ballchasing.js";
@@ -222,7 +223,7 @@ export async function saveConfig(
 ): Promise<void> {
   const { hasBallchasingToken: _hasToken, ...persistable } = config;
   await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(persistable, null, 2)}\n`, {
+  await writeFileAtomic(configPath, `${JSON.stringify(persistable, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -242,7 +243,7 @@ export async function saveAppState(
   state: AppState,
 ): Promise<void> {
   await mkdir(dirname(statePath), { recursive: true });
-  await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, {
+  await writeFileAtomic(statePath, `${JSON.stringify(state, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });

@@ -11,6 +11,8 @@ import {
   EGS_OAUTH_HOST,
   EGS_USER_AGENT,
 } from "./constants.js";
+import { EpicAuthError, epicErrorFromResponse, isTransientEpicError } from "./epicErrors.js";
+import { fetchWithTimeout, withRetries } from "./http.js";
 import type {
   DeviceAuthResponse,
   EpicDeviceAuthCredentials,
@@ -137,7 +139,8 @@ export class EGS {
       EGS_DEVICE_CODE_CLIENT_SECRET,
     );
 
-    const response = await this.fetchFn(
+    const device = await this.requestJson<DeviceAuthResponse>(
+      "Starting Epic sign-in",
       `https://${EGS_OAUTH_HOST}/account/api/oauth/deviceAuthorization`,
       {
         method: "POST",
@@ -150,14 +153,8 @@ export class EGS {
       },
     );
 
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`EG1 device authorization failed: ${response.status} - ${text}`);
-    }
-
-    const device = JSON.parse(text) as DeviceAuthResponse;
     if (!device.device_code?.trim() || !device.user_code?.trim()) {
-      throw new Error("EG1 device authorization failed: incomplete response");
+      throw new EpicAuthError("Starting Epic sign-in failed: incomplete response", "other");
     }
 
     if (!device.verification_uri?.trim()) {
@@ -171,9 +168,11 @@ export class EGS {
     device: DeviceAuthResponse,
     options?: { signal?: AbortSignal },
   ): Promise<TokenResponse> {
-    const attempts = Math.max(1, Math.floor(device.expires_in / Math.max(1, device.interval)));
+    const intervalMs = Math.max(1, device.interval || 5) * 1000;
+    const deadline = Date.now() + Math.max(60, device.expires_in || 600) * 1000;
+    let lastError: unknown;
 
-    for (let i = 0; i < attempts; i++) {
+    while (Date.now() < deadline) {
       if (options?.signal?.aborted) {
         throw new Error(EPIC_DEVICE_AUTH_CANCELLED);
       }
@@ -188,19 +187,41 @@ export class EGS {
           EGS_DEVICE_CODE_CLIENT_ID,
           EGS_DEVICE_CODE_CLIENT_SECRET,
         );
-      } catch {
-        await abortableDelay(Math.max(1, device.interval) * 1000, options?.signal);
+      } catch (error) {
+        // Epic answers "authorization_pending" until the user approves. Stop early only when
+        // the code itself is dead (expired or already used); keep polling through anything
+        // else, including network blips.
+        const deadCode =
+          error instanceof EpicAuthError &&
+          (error.kind === "credentials" || Boolean(error.errorCode?.includes("not_found")));
+        if (deadCode) {
+          throw new Error(
+            "The Epic sign-in code expired or was already used. Start the sign-in again.",
+          );
+        }
+        lastError = error;
       }
+
+      await abortableDelay(intervalMs, options?.signal);
     }
 
-    throw new Error("device authorization timed out");
+    throw new Error(
+      lastError && isTransientEpicError(lastError)
+        ? `Epic sign-in timed out: ${(lastError as Error).message}`
+        : "Epic sign-in timed out. Start the sign-in again and approve it in your browser.",
+    );
   }
 
   async createDeviceAuth(
     accessToken: string,
     accountId: string,
   ): Promise<EpicDeviceAuthCredentials> {
-    const response = await this.fetchFn(
+    const data = await this.requestJson<{
+      deviceId?: string;
+      secret?: string;
+      accountId?: string;
+    }>(
+      "Creating a lasting Epic login",
       `https://${EGS_OAUTH_HOST}/account/api/public/account/${encodeURIComponent(accountId)}/deviceAuth`,
       {
         method: "POST",
@@ -213,22 +234,11 @@ export class EGS {
       },
     );
 
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`create device auth failed: ${response.status} - ${text}`);
-    }
-
-    const data = JSON.parse(text) as {
-      deviceId?: string;
-      secret?: string;
-      accountId?: string;
-    };
-
     const deviceId = data.deviceId?.trim();
     const secret = data.secret?.trim();
     const resolvedAccountId = data.accountId?.trim() || accountId.trim();
     if (!deviceId || !secret || !resolvedAccountId) {
-      throw new Error("create device auth failed: incomplete response");
+      throw new EpicAuthError("Creating a lasting Epic login failed: incomplete response", "other");
     }
 
     return {
@@ -244,7 +254,8 @@ export class EGS {
     accountId: string,
     deviceId: string,
   ): Promise<void> {
-    const response = await this.fetchFn(
+    const response = await fetchWithTimeout(
+      this.fetchFn,
       `https://${EGS_OAUTH_HOST}/account/api/public/account/${encodeURIComponent(accountId)}/deviceAuth/${encodeURIComponent(deviceId)}`,
       {
         method: "DELETE",
@@ -256,8 +267,7 @@ export class EGS {
     );
 
     if (!response.ok && response.status !== 404) {
-      const text = await response.text();
-      throw new Error(`delete device auth failed: ${response.status} - ${text}`);
+      throw epicErrorFromResponse("Revoking the Epic login", response.status, await response.text());
     }
   }
 
@@ -266,10 +276,16 @@ export class EGS {
     clientId = EGS_CLIENT_ID,
     clientSecret = EGS_CLIENT_SECRET,
   ): Promise<TokenResponse> {
-    const body = new URLSearchParams(params);
     const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    // Refresh tokens rotate on use. If a refresh request times out after Epic processed it,
+    // replaying it would fail with invalid_grant and look like a dead login, so only retry
+    // those when Epic answered with an explicit "try again" status.
+    const retryOnNetworkError = params.grant_type !== "refresh_token";
+    // Device-code polling has its own loop; retrying inside it only delays the next poll.
+    const retry = params.grant_type !== "device_code";
 
-    const response = await this.fetchFn(
+    return this.requestJson<TokenResponse>(
+      "Epic sign-in",
       `https://${EGS_OAUTH_HOST}/account/api/oauth/token`,
       {
         method: "POST",
@@ -278,27 +294,76 @@ export class EGS {
           "User-Agent": EGS_USER_AGENT,
           Authorization: `Basic ${auth}`,
         },
-        body,
+        body: new URLSearchParams(params).toString(),
       },
+      { retry, retryOnNetworkError },
     );
+  }
 
-    const text = await response.text();
-    const token = JSON.parse(text) as TokenResponse & {
-      errorCode?: string;
-      errorMessage?: string;
+  /**
+   * Refresh an EG1 refresh token. Accounts linked through device-code login hold a token
+   * issued to the Fortnite iOS client, while older accounts hold a launcher token; Epic
+   * only accepts a refresh token from the client that issued it, so try both.
+   */
+  async refreshWithAnyClient(refreshToken: string): Promise<TokenResponse> {
+    const clients: Array<[string, string]> = [
+      [EGS_DEVICE_AUTH_CLIENT_ID, EGS_DEVICE_AUTH_CLIENT_SECRET],
+      [EGS_CLIENT_ID, EGS_CLIENT_SECRET],
+    ];
+    let lastError: unknown;
+    for (const [clientId, clientSecret] of clients) {
+      try {
+        return await this.requestToken(
+          { grant_type: "refresh_token", refresh_token: refreshToken, token_type: "eg1" },
+          clientId,
+          clientSecret,
+        );
+      } catch (error) {
+        if (isTransientEpicError(error)) {
+          throw error;
+        }
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
+
+  private async requestJson<T>(
+    action: string,
+    url: string,
+    init: RequestInit,
+    options?: { retry?: boolean; retryOnNetworkError?: boolean },
+  ): Promise<T> {
+    const send = async (): Promise<T> => {
+      const response = await fetchWithTimeout(this.fetchFn, url, init);
+      const text = await response.text();
+      if (!response.ok) {
+        throw epicErrorFromResponse(action, response.status, text);
+      }
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        throw new EpicAuthError(`${action} failed: Epic sent an unreadable response`, "transient", {
+          status: response.status,
+        });
+      }
     };
 
-    if (!response.ok) {
-      throw new Error(
-        `authentication failed: ${response.status} - ${token.errorCode ?? "unknown"} - ${token.errorMessage ?? text}`,
-      );
+    if (options?.retry === false) {
+      return send();
     }
 
-    return token;
+    const retryOnNetworkError = options?.retryOnNetworkError ?? true;
+    return withRetries(send, (error) =>
+      error instanceof EpicAuthError
+        ? error.kind === "transient"
+        : retryOnNetworkError && isTransientEpicError(error),
+    );
   }
 
   async getExchangeCode(accessToken: string): Promise<string> {
-    const response = await this.fetchFn(
+    const data = await this.requestJson<{ code?: string }>(
+      "Epic exchange",
       `https://${EGS_OAUTH_HOST}/account/api/oauth/exchange`,
       {
         headers: {
@@ -307,13 +372,9 @@ export class EGS {
         },
       },
     );
-
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`unexpected status code ${response.status}: ${text}`);
+    if (!data.code?.trim()) {
+      throw new EpicAuthError("Epic exchange failed: no exchange code returned", "other");
     }
-
-    const data = JSON.parse(text) as { code: string };
     return data.code;
   }
 
@@ -350,7 +411,8 @@ export class EGS {
 
     const auth = Buffer.from(`${EOS_CLIENT_ID}:${EOS_SECRET}`).toString("base64");
 
-    const response = await this.fetchFn(
+    return this.requestJson<EosTokenResponse>(
+      "Epic Online Services sign-in",
       "https://api.epicgames.dev/epic/oauth/v2/token",
       {
         method: "POST",
@@ -359,15 +421,9 @@ export class EGS {
           Authorization: `Basic ${auth}`,
           "User-Agent": EGS_USER_AGENT,
         },
-        body,
+        body: body.toString(),
       },
+      { retryOnNetworkError: params.grant_type !== "refresh_token" },
     );
-
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`unexpected status code ${response.status}: ${text}`);
-    }
-
-    return JSON.parse(text) as EosTokenResponse;
   }
 }

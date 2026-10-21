@@ -2503,25 +2503,26 @@ function renderAccounts() {
     const card = document.createElement("div");
     card.className = `account-card account-card--${stripe}`;
 
+    // Sync messages can carry text from Epic or Rocket League servers: always escape.
     const statusHint = account.lastSyncError
-      ? `<span class="hint account-error">${account.lastSyncError}</span>`
+      ? `<span class="hint account-error">${escapeHtml(account.lastSyncError)}</span>`
       : account.hasDeviceAuth === false
         ? `<span class="hint account-error">Short-lived login — remove and re-add this account so Overtime can keep you signed in.</span>`
         : account.lastSyncMessage
-          ? `<span class="hint">${account.lastSyncMessage}</span>`
+          ? `<span class="hint">${escapeHtml(account.lastSyncMessage)}</span>`
           : "";
 
     card.innerHTML = `
       <div class="account-card-main">
-        <strong>${account.displayName}</strong>
+        <strong>${escapeHtml(account.displayName)}</strong>
         ${statusHint}
       </div>
       <div class="account-card-actions">
         <label class="checkbox">
-          <input type="checkbox" data-account-id="${account.accountId}" ${account.enabled ? "checked" : ""} />
+          <input type="checkbox" data-account-id="${escapeHtml(account.accountId)}" ${account.enabled ? "checked" : ""} />
           Sync
         </label>
-        <button class="btn btn-danger" data-remove-account="${account.accountId}">Remove</button>
+        <button class="btn btn-danger" data-remove-account="${escapeHtml(account.accountId)}">Remove</button>
       </div>
     `;
     elements.accountsList.appendChild(card);

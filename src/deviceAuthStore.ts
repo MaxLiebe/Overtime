@@ -1,4 +1,5 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink } from "node:fs/promises";
+import { writeFileAtomic } from "./atomicFile.js";
 import { dirname, join } from "node:path";
 import type { EpicDeviceAuthCredentials } from "./types.js";
 
@@ -102,7 +103,7 @@ export async function writeDeviceAuthCredentials(
     };
   }
 
-  await writeFile(path, `${JSON.stringify(file, null, 2)}\n`, {
+  await writeFileAtomic(path, `${JSON.stringify(file, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });

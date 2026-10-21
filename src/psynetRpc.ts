@@ -15,6 +15,9 @@ type PendingRequest = {
   reject: (error: Error) => void;
 };
 
+/** PsyNet answers in well under a second; a silent minute means the socket is dead. */
+const REQUEST_TIMEOUT_MS = 60_000;
+
 export class PsyNetRPC {
   readonly localPlayerId: PlayerId;
   private readonly ws: WebSocket;
@@ -25,16 +28,27 @@ export class PsyNetRPC {
   private pingTimer: ReturnType<typeof setTimeout> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private pongReceived = false;
+  private readonly opened: Promise<void>;
+  private resolveOpened!: () => void;
+  private rejectOpened!: (error: Error) => void;
+  private settledOpen = false;
 
   constructor(ws: WebSocket, localPlayerId: PlayerId, requestId: RequestIdCounter) {
     this.ws = ws;
     this.localPlayerId = localPlayerId;
     this.requestId = requestId;
+    this.opened = new Promise<void>((resolve, reject) => {
+      this.resolveOpened = resolve;
+      this.rejectOpened = reject;
+    });
+    // Nobody may be awaiting yet; avoid an unhandled rejection if the socket fails early.
+    this.opened.catch(() => undefined);
   }
 
   start(): void {
     this.ws.on("open", () => {
       this.connected = true;
+      this.settleOpen();
       this.schedulePing();
     });
 
@@ -42,13 +56,52 @@ export class PsyNetRPC {
       this.handleMessage(data.toString());
     });
 
-    this.ws.on("close", () => {
+    this.ws.on("close", (code) => {
+      this.settleOpen(new Error(`Rocket League servers closed the connection (code ${code})`));
       this.handleDisconnect();
     });
 
-    this.ws.on("error", () => {
+    this.ws.on("error", (error) => {
+      this.settleOpen(
+        new Error(`Could not connect to Rocket League servers (${error.message || "socket error"})`),
+      );
       this.handleDisconnect();
     });
+  }
+
+  private settleOpen(error?: Error): void {
+    if (this.settledOpen) {
+      return;
+    }
+    this.settledOpen = true;
+    if (error) {
+      this.rejectOpened(error);
+    } else {
+      this.resolveOpened();
+    }
+  }
+
+  /** Resolve once the socket is open; reject as soon as it fails or after `timeoutMs`. */
+  async waitForOpen(timeoutMs = 15_000): Promise<void> {
+    if (this.isConnected()) {
+      return;
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("Timed out connecting to Rocket League servers"));
+      }, timeoutMs);
+    });
+
+    try {
+      await Promise.race([this.opened, timeout]);
+    } catch (error) {
+      await this.close();
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   isConnected(): boolean {
@@ -61,19 +114,24 @@ export class PsyNetRPC {
   }
 
   async close(): Promise<void> {
-    if (this.connected) {
-      this.connected = false;
-      this.clearPingTimers();
+    this.settleOpen(new Error("connection closed"));
+    const wasConnected = this.connected;
+    this.connected = false;
+    this.clearPingTimers();
 
-      for (const [requestId, pending] of this.pendingRequests) {
-        pending.reject(new Error("connection closed"));
-        this.pendingRequests.delete(requestId);
-      }
+    for (const [requestId, pending] of this.pendingRequests) {
+      pending.reject(new Error("connection closed"));
+      this.pendingRequests.delete(requestId);
+    }
 
-      if (this.ws.readyState === this.ws.OPEN) {
-        this.ws.close();
-      }
+    if (this.ws.readyState === this.ws.OPEN) {
+      this.ws.close();
+    } else if (this.ws.readyState === this.ws.CONNECTING) {
+      // A socket that never opened would otherwise linger until the OS gives up on it.
+      this.ws.terminate();
+    }
 
+    if (wasConnected) {
       this.emitEvent(EventType.Disconnected, "");
     }
   }
@@ -109,8 +167,14 @@ export class PsyNetRPC {
     );
 
     return new Promise((resolve, reject) => {
-      const abortHandler = () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
         this.pendingRequests.delete(requestId);
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abortHandler);
+      };
+      const abortHandler = () => {
+        cleanup();
         reject(new DOMException("Aborted", "AbortError"));
       };
 
@@ -120,22 +184,25 @@ export class PsyNetRPC {
       }
 
       signal?.addEventListener("abort", abortHandler, { once: true });
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Rocket League servers did not answer ${service} in time`));
+      }, REQUEST_TIMEOUT_MS);
 
       this.pendingRequests.set(requestId, {
         resolve: (response) => {
-          signal?.removeEventListener("abort", abortHandler);
+          cleanup();
           resolve(response);
         },
         reject: (error) => {
-          signal?.removeEventListener("abort", abortHandler);
+          cleanup();
           reject(error);
         },
       });
 
       this.ws.send(message, (error) => {
         if (error) {
-          this.pendingRequests.delete(requestId);
-          signal?.removeEventListener("abort", abortHandler);
+          cleanup();
           reject(error);
         }
       });

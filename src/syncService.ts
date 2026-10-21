@@ -1,7 +1,6 @@
-import { authenticate, type AuthenticatedSession } from "./auth.js";
+import { authenticate, EpicSessionExpiredError, type AuthenticatedSession } from "./auth.js";
 import { isPsyNetBuildRejected, LOCAL_REPLAY_FALLBACK_MESSAGE } from "./psynet.js";
 import {
-  accountAccessTokenIsValid,
   accountCanAuthenticate,
   loadAccounts,
   modifyAccounts,
@@ -71,17 +70,13 @@ export interface SyncRunOptions {
 }
 
 function formatAccountAuthError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (
-    message.includes("invalid_refresh_token") ||
-    message.includes("TOKEN_NOT_FOUND") ||
-    message.includes("oauth.invalid_token") ||
-    message.includes("Epic exchange failed") ||
-    message.includes("Epic EOS token failed")
-  ) {
+  // Only an explicit rejection of every saved credential means "sign in again". Network
+  // trouble, Epic outages and Rocket League server errors keep their own message so the
+  // account is not flagged as signed out over something that fixes itself.
+  if (error instanceof EpicSessionExpiredError) {
     return SESSION_EXPIRED_MESSAGE;
   }
-  return message;
+  return error instanceof Error ? error.message : String(error);
 }
 
 function sessionAccountUpdates(
@@ -121,28 +116,36 @@ export class SyncService {
 
     this.running = true;
     const config = this.getConfig();
-    let state = await loadAppState(this.paths.statePath);
-    let accounts = await loadAccounts(this.paths.accountsPath);
-    let enabledAccounts = accounts
-      .filter((account) => account.enabled)
-      .sort((a, b) => Date.parse(a.addedAt) - Date.parse(b.addedAt));
+    let state: AppState;
+    let accounts: LinkedAccount[];
+    let enabledAccounts: LinkedAccount[];
+    try {
+      state = await loadAppState(this.paths.statePath);
+      accounts = await loadAccounts(this.paths.accountsPath);
+      enabledAccounts = accounts
+        .filter((account) => account.enabled)
+        .sort((a, b) => Date.parse(a.addedAt) - Date.parse(b.addedAt));
 
-    if (options?.onlyAccountIds?.length) {
-      const allowed = new Set(options.onlyAccountIds);
-      enabledAccounts = enabledAccounts.filter((account) => allowed.has(account.accountId));
-    }
+      if (options?.onlyAccountIds?.length) {
+        const allowed = new Set(options.onlyAccountIds);
+        enabledAccounts = enabledAccounts.filter((account) => allowed.has(account.accountId));
+      }
 
-    if (enabledAccounts.length === 0) {
+      if (enabledAccounts.length === 0) {
+        throw new Error("No Epic accounts linked. Add an account in Settings to sync replays.");
+      }
+
+      state = {
+        ...state,
+        isSyncing: true,
+        lastSyncError: undefined,
+      };
+      await saveAppState(this.paths.statePath, state);
+    } catch (error) {
+      // Never leave the service marked busy: every later sync would be refused.
       this.running = false;
-      throw new Error("No Epic accounts linked. Add an account in Settings to sync replays.");
+      throw error;
     }
-
-    state = {
-      ...state,
-      isSyncing: true,
-      lastSyncError: undefined,
-    };
-    await saveAppState(this.paths.statePath, state);
     onUpdate?.(state, accounts);
 
     const result: SyncRunResult = {
@@ -202,64 +205,33 @@ export class SyncService {
             await persistAuthTokens({ deviceAuth });
           };
 
-          session = await authenticate(
-            freshEos
-              ? {
-                  eosTokenResponse: freshEos,
-                  displayName: account.displayName,
-                  accountId: account.accountId,
-                  deviceAuth: account.deviceAuth,
-                  onEosTokenRefreshed: async (eos) => {
-                    await persistAuthTokens(sessionFromEos(eos));
-                  },
-                  onDeviceAuthProvisioned: persistDeviceAuth,
-                }
-              : freshAuth
-              ? {
-                  tokenResponse: freshAuth,
-                  displayName: account.displayName,
-                  accountId: account.accountId,
-                  deviceAuth: account.deviceAuth,
-                  onEosTokenRefreshed: async (eos) => {
-                    await persistAuthTokens(sessionFromEos(eos));
-                  },
-                  onDeviceAuthProvisioned: persistDeviceAuth,
-                }
-              : accountAccessTokenIsValid(account)
-                ? {
-                    accessToken: account.accessToken,
-                    accessTokenExpiresAt: account.accessTokenExpiresAt,
-                    refreshToken: account.refreshToken,
-                    eosRefreshToken: account.eosRefreshToken,
-                    eosRefreshExpiresAt: account.eosRefreshExpiresAt,
-                    deviceAuth: account.deviceAuth,
-                    displayName: account.displayName,
-                    accountId: account.accountId,
-                    onEosTokenRefreshed: async (eos) => {
-                      await persistAuthTokens(sessionFromEos(eos));
-                    },
-                    onDeviceAuthProvisioned: persistDeviceAuth,
-                  }
-                : {
-                    refreshToken: account.refreshToken,
-                    eosRefreshToken: account.eosRefreshToken,
-                    eosRefreshExpiresAt: account.eosRefreshExpiresAt,
-                    deviceAuth: account.deviceAuth,
-                    displayName: account.displayName,
-                    accountId: account.accountId,
-                    onTokenRefreshed: async (auth) => {
-                      const nextToken = auth.refresh_token?.trim();
-                      await persistAuthTokens({
-                        ...sessionFromAuth(auth),
-                        ...(nextToken ? { refreshToken: nextToken } : {}),
-                      });
-                    },
-                    onEosTokenRefreshed: async (eos) => {
-                      await persistAuthTokens(sessionFromEos(eos));
-                    },
-                    onDeviceAuthProvisioned: persistDeviceAuth,
-                  },
-          );
+          // Hand over every saved credential at once: authenticate() tries them in order
+          // and falls through when one has gone stale.
+          session = await authenticate({
+            eosTokenResponse: freshEos,
+            tokenResponse: freshAuth,
+            accessToken: account.accessToken,
+            accessTokenExpiresAt: account.accessTokenExpiresAt,
+            refreshToken: account.refreshToken,
+            eosRefreshToken: account.eosRefreshToken,
+            eosRefreshExpiresAt: account.eosRefreshExpiresAt,
+            deviceAuth: account.deviceAuth,
+            displayName: account.displayName,
+            accountId: account.accountId,
+            onTokenRefreshed: async (auth) => {
+              const nextToken = auth.refresh_token?.trim();
+              await persistAuthTokens({
+                ...sessionFromAuth(auth),
+                // Keep the name the user already sees; Epic's can lag behind renames.
+                displayName: account.displayName || auth.displayName,
+                ...(nextToken ? { refreshToken: nextToken } : {}),
+              });
+            },
+            onEosTokenRefreshed: async (eos) => {
+              await persistAuthTokens(sessionFromEos(eos));
+            },
+            onDeviceAuthProvisioned: persistDeviceAuth,
+          });
 
           if (account.accountId !== session.accountId) {
             accounts = await modifyAccounts(this.paths.accountsPath, (current) =>

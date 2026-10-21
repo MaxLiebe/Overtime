@@ -1,7 +1,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { FEATURE_SET, GAME_VERSION } from "./constants.js";
+import { getLatestKnownPsyNetBuild } from "./psyNetBuilds.js";
 import { getWindowsDocumentsCandidates } from "./windowsDocuments.js";
 
 export interface PsyNetVersionInfo {
@@ -141,9 +141,10 @@ export function resolvePsyNetVersion(options?: {
   /** Force a re-read even when a cache entry exists. */
   forceRefresh?: boolean;
 }): PsyNetVersionInfo {
+  const latestKnown = getLatestKnownPsyNetBuild();
   const fallback: PsyNetVersionInfo = {
-    gameVersion: GAME_VERSION,
-    featureSet: FEATURE_SET,
+    gameVersion: latestKnown.gameVersion,
+    featureSet: latestKnown.featureSet,
   };
 
   const existing: Array<{ path: string; mtimeMs: number }> = [];

@@ -73,7 +73,7 @@ async function refreshEosOnly(account: LinkedAccount): Promise<Partial<LinkedAcc
 
 async function refreshEg1AndEos(account: LinkedAccount): Promise<Partial<LinkedAccount> | null> {
   const egs = new EGS();
-  const auth = await egs.authenticateWithRefreshToken(account.refreshToken.trim());
+  const auth = await egs.refreshWithAnyClient(account.refreshToken.trim());
   const updates: Partial<LinkedAccount> = {
     ...sessionFromAuth(auth),
     ...(auth.refresh_token?.trim() ? { refreshToken: auth.refresh_token.trim() } : {}),
