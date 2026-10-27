@@ -11,6 +11,7 @@ import { writeFileAtomic } from "../dist/atomicFile.js";
 import {
   BUNDLED_PSYNET_BUILDS,
   REMOTE_PSYNET_BUILDS_URL,
+  RLAPI_PSYNET_SOURCE_URL,
   getKnownPsyNetBuilds,
   resetPsyNetBuildState,
 } from "../dist/psyNetBuilds.js";
@@ -93,6 +94,28 @@ test("A build secret published after release is picked up without an app update"
   await rpc.close();
   assert.equal(getKnownPsyNetBuilds()[0].gameVersion, published.gameVersion);
   assert.ok(!getKnownPsyNetBuilds().some((build) => build.gameVersion === "bad"));
+});
+
+test("A new build published only by rlapi is picked up automatically", async () => {
+  const secret = "a".repeat(64);
+  const goSource = `const (
+	baseURL      = "https://api.rlpp.psynet.gg/rpc"
+	gameVersion  = "999999.3.3"
+	featureSet   = "PrimeUpdate99_FFE7A62B41040BB67F8829FD67F2EE8A"
+	buildSecret  = "${secret}"
+)`;
+  const fetchFn = async (url, init) => {
+    if (String(url) === REMOTE_PSYNET_BUILDS_URL) {
+      return new Response("not found", { status: 404 });
+    }
+    if (String(url) === RLAPI_PSYNET_SOURCE_URL) {
+      return new Response(goSource);
+    }
+    return psyNetAuth(init, secret);
+  };
+  const { rpc } = await new PsyNet({ fetchFn }).authPlayer("ticket", "abc", "Player");
+  await rpc.close();
+  assert.equal(getKnownPsyNetBuilds()[0].featureSet, "PrimeUpdate99_FFE7A62B41040BB67F8829FD67F2EE8A");
 });
 
 test("Rejection of every build is reported as a build problem", async () => {

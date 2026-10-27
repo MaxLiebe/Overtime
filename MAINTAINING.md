@@ -7,8 +7,10 @@ Rocket League's servers (PsyNet) require when Overtime signs in. Until Overtime 
 secret, sync shows "Rocket League's servers don't accept this version of Overtime" and no new
 replays download.
 
-Overtime tries every build it knows (the installed game's build first, then newest to oldest),
-so an older build often keeps working for a while after a patch. To add the new build:
+Overtime tries every build it knows (the installed game's build first, then newest to oldest).
+It also reads the newest build from [dank/rlapi's `psynet.go`](https://github.com/dank/rlapi/blob/master/psynet.go)
+by itself, so once rlapi updates after a patch, sync recovers with no action from you. To add a
+build yourself (for example when rlapi is slow):
 
 1. Find the new values: the game version (`GPsyonixBuildID` in Rocket League's `Launch.log`),
    the feature set (`Using feature set ...` in the same log), and the build secret.
