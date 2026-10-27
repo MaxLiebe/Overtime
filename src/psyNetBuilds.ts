@@ -19,6 +19,12 @@ export interface PsyNetBuild {
  */
 export const BUNDLED_PSYNET_BUILDS: readonly PsyNetBuild[] = [
   {
+    // Rocket League patch of 2026-10-13.
+    gameVersion: "261013.63066.530866",
+    featureSet: "PrimeUpdate60_FFE7A62B41040BB67F8829FD67F2EE8A",
+    buildSecret: "76656a5b51ec57a13549eef732c8a8367638aa3a7989bade1f7e4e5f93d57625",
+  },
+  {
     // Rocket League patch of 2026-10-01.
     gameVersion: "261001.2867.529371",
     featureSet: "PrimeUpdate60",
@@ -38,6 +44,14 @@ export const BUNDLED_PSYNET_BUILDS: readonly PsyNetBuild[] = [
  */
 export const REMOTE_PSYNET_BUILDS_URL =
   "https://raw.githubusercontent.com/MaxLiebe/Overtime/main/psynet-builds.json";
+
+/**
+ * dank/rlapi, an open-source PsyNet client, bumps its bundled build within days of each
+ * patch. Reading its constants means a new secret reaches users even before anyone
+ * updates `psynet-builds.json` here. Only used to add builds; ours wins on conflicts.
+ */
+export const RLAPI_PSYNET_SOURCE_URL =
+  "https://raw.githubusercontent.com/dank/rlapi/master/psynet.go";
 
 const REMOTE_REFRESH_INTERVAL_MS = 60 * 60_000;
 /** After a rejection, re-check sooner, but not on every account of every sync. */
@@ -119,25 +133,68 @@ async function loadCacheOnce(): Promise<void> {
   }
 }
 
-async function fetchRemoteBuilds(fetchFn: typeof fetch): Promise<void> {
+/** Pull `gameVersion`, `featureSet` and `buildSecret` out of rlapi's Go constants. */
+export function parseRlapiConstants(source: string): PsyNetBuild[] {
+  const constant = (name: string) =>
+    source.match(new RegExp(`\\b${name}\\s*=\\s*"([^"]+)"`))?.[1]?.trim() ?? "";
+  return parseBuilds([
+    {
+      gameVersion: constant("gameVersion"),
+      featureSet: constant("featureSet"),
+      buildSecret: constant("buildSecret"),
+    },
+  ]);
+}
+
+async function fetchText(fetchFn: typeof fetch, url: string): Promise<string | null> {
   try {
     const response = await fetchWithTimeout(
       fetchFn,
-      REMOTE_PSYNET_BUILDS_URL,
-      { headers: { Accept: "application/json", "Cache-Control": "no-cache" } },
+      url,
+      { headers: { "Cache-Control": "no-cache" } },
       REMOTE_FETCH_TIMEOUT_MS,
     );
-    if (!response.ok) {
-      return;
-    }
-    const builds = parseBuilds(JSON.parse(await response.text()));
+    return response.ok ? await response.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseBuildList(text: string | null): PsyNetBuild[] {
+  if (!text) {
+    return [];
+  }
+  try {
+    return parseBuilds(JSON.parse(text));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchRemoteBuilds(fetchFn: typeof fetch): Promise<void> {
+  try {
+    const [published, rlapi] = await Promise.all([
+      fetchText(fetchFn, REMOTE_PSYNET_BUILDS_URL),
+      fetchText(fetchFn, RLAPI_PSYNET_SOURCE_URL),
+    ]);
+    const ours = parseBuildList(published);
+    const theirs = rlapi ? parseRlapiConstants(rlapi) : [];
+    const builds = [
+      ...ours,
+      ...theirs.filter((build) => !ours.some((own) => own.gameVersion === build.gameVersion)),
+    ];
     if (builds.length === 0) {
       return;
     }
-    remoteBuilds = builds;
+    // Keep builds learned earlier: rlapi only lists its newest one.
+    const known = new Map(remoteBuilds.map((build) => [build.gameVersion, build]));
+    for (const build of builds) {
+      known.set(build.gameVersion, build);
+    }
+    remoteBuilds = [...known.values()];
     if (cachePath) {
       await mkdir(dirname(cachePath), { recursive: true });
-      await writeFileAtomic(cachePath, `${JSON.stringify({ builds }, null, 2)}\n`);
+      await writeFileAtomic(cachePath, `${JSON.stringify({ builds: remoteBuilds }, null, 2)}\n`);
     }
   } catch {
     // Offline or GitHub unreachable: bundled and cached builds still apply.

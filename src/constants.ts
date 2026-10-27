@@ -3,8 +3,8 @@ export const BASE_URL = "https://api.rlpp.psynet.gg/rpc";
  * Fallback when Launch.log is unavailable. Build secrets live in `psyNetBuilds.ts` (and the
  * published `psynet-builds.json`); keep this equal to the newest bundled build there.
  */
-export const GAME_VERSION = "261001.2867.529371";
-export const FEATURE_SET = "PrimeUpdate60";
+export const GAME_VERSION = "261013.63066.530866";
+export const FEATURE_SET = "PrimeUpdate60_FFE7A62B41040BB67F8829FD67F2EE8A";
 export const PSY_SIG_KEY = "c338bd36fb8c42b1a431d30add939fc7";
 
 export const PING_INTERVAL_MS = 20_000;
